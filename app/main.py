@@ -3,7 +3,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
-from fastapi import Body, Depends, FastAPI, HTTPException, Query
+from fastapi import Body, Depends, FastAPI, HTTPException, Query, Request
+from fastapi.responses import HTMLResponse
 from sqlmodel import Session, select
 
 from app.db import ROOT, get_session, init_db
@@ -24,8 +25,10 @@ from app.models import (
 from app.pending import credit_applications_for_month, resolved_after_close
 from app.money import ZERO, money_equal, to_money
 from app.posting import excluded_from_linking, note_value
+from app.home import render_home
 from app.phone import router as phone_router
 from app.statements import import_statement_text
+from app.sync import SyncError, run_sync, sync_status
 
 # Open tasks that block the month unless the owner accepts them one by one.
 BLOCKING_KINDS = ("missing_document", "missing_sales_invoice")
@@ -202,9 +205,37 @@ def period_gaps(session, month):
     return bank_lines, unsupported, blocking, accepted
 
 
+def _prefers_html(request):
+    # type: (Request) -> bool
+    accept = request.headers.get("accept") or ""
+    if "text/html" not in accept:
+        return False
+    html_at = accept.find("text/html")
+    json_at = accept.find("application/json")
+    if json_at == -1:
+        return True
+    return html_at < json_at
+
+
 @app.get("/")
-def root():
+def root(request: Request):
+    if _prefers_html(request):
+        return HTMLResponse(render_home())
     return {"name": "MonthClose AI", "docs": "/docs"}
+
+
+@app.post("/sync")
+def sync_mailbox() -> dict:
+    """Read Gmail, process documents, upload to Drive, link, and draft owner mail."""
+    try:
+        return run_sync()
+    except SyncError as exc:
+        raise HTTPException(status_code=exc.status, detail=exc.code)
+
+
+@app.get("/sync/status")
+def sync_mailbox_status() -> dict:
+    return sync_status()
 
 
 @app.post("/documents", response_model=Document)

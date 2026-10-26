@@ -48,6 +48,7 @@ from app.posting import (
     liability_account,
     main_line,
     norm_nif,
+    keeping_note,
     note_value,
     party_label,
     primary_rate,
@@ -595,7 +596,7 @@ def process_email_without_pdf(session, message, eml_path, reprocess=False):
             existing.amount = ZERO
             existing.due_date = due
             existing.status = "open"
-            existing.notes = notes
+            existing.notes = keeping_note(existing.notes, notes, "gmail_draft_id")
             existing.assignee = task_assignee("invoice_to_request")
             existing.draft_email = draft
             existing.confidence = confidence
@@ -1287,7 +1288,7 @@ def _record_missing_sale(
             item.amount = to_money(amount)
             item.period = period
             item.document_id = document_id
-            item.notes = notes
+            item.notes = keeping_note(item.notes, notes, "gmail_draft_id")
             item.status = "open"
             session.add(item)
             session.commit()
@@ -2267,6 +2268,21 @@ def save_scan_file(data, filename):
     return _save_attachment(data, filename or "scan", UPLOAD_DIR)
 
 
+def _file_processed_documents(session, results):
+    # type: (Session, List[Dict[str, Any]]) -> None
+    """Upload a scan when Drive is already authorized. A failure leaves the document stored."""
+    from app.google_auth import token_ready
+
+    if not token_ready():
+        return
+    try:
+        from app.drive import upload_result_documents
+
+        upload_result_documents(session, results)
+    except Exception:
+        logger.error("drive upload after scan failed")
+
+
 def process_scan_bytes(session, data, filename, note, categories):
     # type: (Session, bytes, str, str, list) -> List[Dict[str, Any]]
     """Process one scanned PDF or photo: no sender and no email body.
@@ -2326,6 +2342,7 @@ def process_scan_bytes(session, data, filename, note, categories):
         from app.receipts import apply_receipt_rules
 
         apply_receipt_rules(session, results, rule_text, note or "")
+    _file_processed_documents(session, results)
     return results
 
 

@@ -26,6 +26,7 @@ from app.posting import (
     TIPO_SETTLEMENT,
     excluded_from_linking,
     norm_nif,
+    keeping_note,
     note_value,
     risk_flag_names,
     suspect_flags,
@@ -956,7 +957,7 @@ def _missing_item(session, line):
     existing.description = description
     existing.amount = to_money(abs(line.amount))
     existing.status = "open"
-    existing.notes = notes
+    existing.notes = keeping_note(existing.notes, notes, "gmail_draft_id")
     existing.assignee = "owner"
     existing.period = line.period
     session.add(existing)

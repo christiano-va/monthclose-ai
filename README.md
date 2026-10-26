@@ -2,7 +2,7 @@
 
 MonthClose closes the books of a Portuguese micro-company for one month.
 
-The rule is: no bank line without a supporting document. Mail comes in as `.eml` files (later the same mailbox interface can talk to Gmail). Each PDF is read into JSON by the model. Code then checks the totals, the VAT and the tax id, files the document, and records it. A bank statement CSV is imported and every line is linked to the documents that support it. What is still missing becomes an owner task. The owner can accept those items and close the month. A later document or a plain-text explanation can resolve an item that was still open, including one the owner already accepted. A closed month is not reopened; the resolution is reported beside the acceptance it replaces.
+The rule is: no bank line without a supporting document. Mail comes in as `.eml` files or from Gmail through the same mailbox interface. Each PDF is read into JSON by the model. Code then checks the totals, the VAT and the tax id, files the document in Google Drive, and records it with the Drive link. A bank statement CSV is imported and every line is linked to the documents that support it. What is still missing becomes an owner task. MonthClose prepares a Gmail draft for the owner and does not send it. The owner can accept those items and close the month. A later document or a plain-text explanation can resolve an item that was still open, including one the owner already accepted. A closed month is not reopened; the resolution is reported beside the acceptance it replaces.
 
 The model proposes. Code checks the arithmetic. A low-confidence decision waits for a person. Amounts are `Decimal`, never `float`. The sample company data under `data/inbox` and `data/history` is synthetic.
 
@@ -23,6 +23,8 @@ Create a `.env` file in the project root. Do not commit it. It needs:
 - `XAI_VISION_MODEL` — vision model for phone photos (defaults to `grok-4.7` when unset)
 - `COMPANY_NIF` — 9-digit tax id of the company that issues the sales invoices
 - `SCAN_CODE` — access code required by the phone scan page
+- `GMAIL_QUERY` — Gmail search the sync reads. Default: `label:monthclose -label:monthclose-processed`
+- `OWNER_EMAIL` — address on owner drafts. Drafts are never sent automatically
 
 ## Run the API
 
@@ -31,7 +33,44 @@ source venv/bin/activate
 uvicorn app.main:app --reload
 ```
 
-Interactive docs are at `http://127.0.0.1:8000/docs`.
+Interactive docs are at `http://127.0.0.1:8000/docs`. A browser open on `http://127.0.0.1:8000/` shows a **Sync now** button. API clients that do not ask for HTML still receive the JSON service name.
+
+## Google Gmail and Drive
+
+The app uses an OAuth desktop client. Scopes are `gmail.modify` (read the MonthClose label, add a label, insert copies, create drafts) and `drive.file` (only files this app creates). It does not send mail and it does not read the rest of the mailbox or Drive.
+
+1. In Google Cloud, create a project and enable the Gmail API and the Google Drive API.
+2. On the OAuth consent screen, add the Google account you will sign in with as a test user.
+3. Create an OAuth client of type **Desktop app**. Download the JSON and save it as `credentials.json` in the project root. Do not commit it.
+4. Put `GMAIL_QUERY` and `OWNER_EMAIL` in `.env`. Leave `GMAIL_QUERY` as the default unless you intend a narrower search. The sync refuses an empty query, so it cannot list the whole mailbox.
+5. Authorize once. A browser opens. When it finishes, the command prints `authorized` and writes `token.json` (also not committed):
+
+```bash
+python -m app.gmail_auth
+```
+
+6. Copy the local inbox into Gmail under the label `monthclose`. This uses `users.messages.insert`, keeps each message's original date, and does not send anything. A Message-ID that is already in the mailbox is not inserted again; if that copy is missing the `monthclose` label, the label is added. `--demo` inserts `data/demo/emails` instead:
+
+```bash
+python -m app.gmail_seed
+python -m app.gmail_seed --demo
+```
+
+7. Sync. This reads only `GMAIL_QUERY`, runs each message through the same pipeline as a local `.eml`, uploads each new document to Drive, links bank lines, and creates owner drafts:
+
+```bash
+curl -X POST http://127.0.0.1:8000/sync
+```
+
+Or use **Sync now** on the home page. `GET /sync/status` returns whether a sync is running and the last summary. The summary is counts.
+
+Drive: the app creates a folder named **MonthClose AI** and a subfolder per period (`YYYY-MM`). Each email attachment and each phone scan is uploaded as `date_entity_number.pdf` (photos keep their image extension). The link is stored on `document.drive_link`. A document that already has a link is not uploaded again. Nothing from Drive is written into the repository.
+
+Labels: `monthclose` and `monthclose-processed` are created if they are missing. After a message is processed, the app adds `monthclose-processed`, which takes it out of the default query.
+
+Owner drafts: open `missing_document` and `invoice_to_request` tasks become Gmail drafts addressed to `OWNER_EMAIL`. The app never calls send. A task that already has a draft is skipped.
+
+Model replies stay cached by file hash under `data/cache/`, so a second sync does not call the model again for the same file.
 
 ## Phone scan
 
@@ -122,7 +161,9 @@ When an invoice arrives from an issuer that still has an unapplied credit note, 
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| `GET` | `/` | Service name |
+| `GET` | `/` | Service name, or the home page with **Sync now** when the client asks for HTML |
+| `POST` | `/sync` | Read Gmail, process, upload to Drive, link, and draft owner mail. Returns counts |
+| `GET` | `/sync/status` | Whether a sync is running, and the last summary |
 | `POST` | `/documents` | Store one document. `base + vat` must equal `total`. |
 | `GET` | `/documents?period=YYYY-MM` | List documents, optionally for one month |
 | `POST` | `/bank-statements` | Import a statement CSV from `path` or `content` |

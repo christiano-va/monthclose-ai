@@ -524,6 +524,15 @@ def set_note(notes, key, value):
     return " | ".join(parts)
 
 
+def keeping_note(old_notes, new_notes, key):
+    # type: (Optional[str], str, str) -> str
+    """Keep one note when a task is rewritten, so a Gmail draft is not created twice."""
+    value = note_value(old_notes, key)
+    if not value:
+        return new_notes
+    return set_note(new_notes, key, value)
+
+
 def risk_flag_names(notes):
     # type: (Optional[str]) -> List[str]
     raw = note_value(notes, "risk_flags") or ""

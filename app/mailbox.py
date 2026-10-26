@@ -1,4 +1,4 @@
-"""Mailbox abstraction: local .eml files now, Gmail later."""
+"""Mailbox abstraction: local .eml files and Gmail, same message shape."""
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -25,6 +25,7 @@ class MailMessage:
     attachments: List[Attachment] = field(default_factory=list)
     source_path: Optional[str] = None
     message_id: Optional[str] = None
+    gmail_id: Optional[str] = None
 
 
 class Mailbox(ABC):
@@ -34,9 +35,8 @@ class Mailbox(ABC):
         raise NotImplementedError
 
 
-def _parse_eml(path):
-    # type: (Path) -> MailMessage
-    raw = path.read_bytes()
+def _parse_bytes(raw, source_path=None):
+    # type: (bytes, Optional[str]) -> MailMessage
     msg = BytesParser(policy=policy.default).parsebytes(raw)
     sender = str(msg.get("from") or "")
     subject = str(msg.get("subject") or "")
@@ -83,9 +83,15 @@ def _parse_eml(path):
         date=parsed_date,
         body="\n".join(body_parts).strip(),
         attachments=attachments,
-        source_path=str(path),
+        source_path=source_path,
         message_id=message_id,
     )
+
+
+def _parse_eml(path):
+    # type: (Path) -> MailMessage
+    file_path = Path(path)
+    return _parse_bytes(file_path.read_bytes(), source_path=str(file_path))
 
 
 class LocalEmlMailbox(Mailbox):
@@ -104,8 +110,37 @@ class LocalEmlMailbox(Mailbox):
 
 
 class GmailMailbox(Mailbox):
-    """Same interface as LocalEmlMailbox; Gmail API wiring comes later."""
+    """Messages that match GMAIL_QUERY, parsed the same way as a local .eml.
+
+    The query is the only list filter. After a message is processed, call
+    mark_processed to add the monthclose-processed label.
+    """
+
+    def __init__(self):
+        # type: () -> None
+        from app.gmail_api import LABEL_MONTHCLOSE, LABEL_PROCESSED, ensure_label
+        from app.google_auth import gmail_service
+        from app.settings import gmail_query
+
+        self.query = gmail_query()
+        self._service = gmail_service()
+        ensure_label(self._service, LABEL_MONTHCLOSE)
+        self._processed_label = ensure_label(self._service, LABEL_PROCESSED)
 
     def messages(self):
         # type: () -> Iterable[MailMessage]
-        raise NotImplementedError("Gmail mailbox is not implemented yet")
+        from app.gmail_api import fetch_raw, iter_message_ids
+
+        for gmail_id in iter_message_ids(self._service, self.query):
+            raw = fetch_raw(self._service, gmail_id)
+            message = _parse_bytes(raw, source_path="gmail:%s" % gmail_id)
+            message.gmail_id = gmail_id
+            yield message
+
+    def mark_processed(self, message):
+        # type: (MailMessage) -> None
+        from app.gmail_api import add_label
+
+        if not message.gmail_id:
+            raise RuntimeError("missing_gmail_id")
+        add_label(self._service, message.gmail_id, self._processed_label)

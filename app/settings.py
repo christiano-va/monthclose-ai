@@ -24,3 +24,18 @@ def scan_code():
     # type: () -> str
     """Shared access code for the phone scan page. Empty when unset."""
     return (os.getenv("SCAN_CODE") or "").strip()
+
+
+def gmail_query():
+    # type: () -> str
+    """Gmail search used by the mailbox. Blank means the MonthClose labels only."""
+    raw = (os.getenv("GMAIL_QUERY") or "").strip()
+    if not raw:
+        return "label:monthclose -label:monthclose-processed"
+    return raw
+
+
+def owner_email():
+    # type: () -> str
+    """Address that receives owner drafts. Empty when unset. Drafts are never sent."""
+    return (os.getenv("OWNER_EMAIL") or "").strip()
