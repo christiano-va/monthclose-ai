@@ -32,6 +32,9 @@ _COLUMN_UPGRADES = {
     "openitem": {
         "assignee": "VARCHAR",
         "draft_email": "TEXT",
+        "approval_reason": "VARCHAR",
+        "approved_by": "VARCHAR",
+        "approved_at": "DATETIME",
     },
 }
 

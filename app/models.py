@@ -1,6 +1,6 @@
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Optional
+from typing import List, Optional
 
 from sqlalchemy import Column, Numeric, UniqueConstraint
 from sqlmodel import Field, SQLModel
@@ -92,16 +92,19 @@ class OpenItem(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     document_id: Optional[int] = Field(default=None, foreign_key="document.id")
     period: str = Field(index=True)
-    kind: str  # receivable | payable | invoice_to_request | missing_document
+    kind: str  # receivable | payable | invoice_to_request | missing_document | missing_sales_invoice
     description: str
     amount: Decimal = Field(sa_column=Column(Numeric(14, 2), nullable=False))
     due_date: Optional[date] = None
-    status: str = Field(default="open", index=True)
+    status: str = Field(default="open", index=True)  # open | done | accepted_by_owner
     notes: Optional[str] = None
     assignee: Optional[str] = None  # owner | (unset for ledger items)
     draft_email: Optional[str] = None
     confidence: float = 1.0
     justification: str = "open item from history or inbox"
+    approval_reason: Optional[str] = None
+    approved_by: Optional[str] = None
+    approved_at: Optional[datetime] = None
 
 
 class DocumentCreate(SQLModel):
@@ -145,3 +148,14 @@ class LinkCreate(SQLModel):
     method: str
     explanation: str
     confidence: float
+
+
+class ApprovalDecision(SQLModel):
+    id: int
+    reason: str
+
+
+class PeriodCloseBody(SQLModel):
+    approvals: List[ApprovalDecision] = Field(default_factory=list)
+    approved_by: Optional[str] = None
+    timestamp: Optional[datetime] = None

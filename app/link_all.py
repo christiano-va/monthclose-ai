@@ -6,6 +6,7 @@ import argparse
 import json
 import logging
 import sys
+from datetime import datetime
 
 from fastapi.testclient import TestClient
 from sqlmodel import Session, select
@@ -13,10 +14,20 @@ from sqlmodel import Session, select
 from app.db import ROOT, engine, init_db
 from app.linker import link_all
 from app.main import app
-from app.models import BankLine, Document, Link
+from app.models import BankLine, Document, Link, OpenItem, Period
 from app.statements import verify_statement_text
 
-METHODS = ("reference", "exact", "n_to_1", "1_to_n", "llm", "unsupported")
+METHODS = (
+    "reference",
+    "exact",
+    "n_to_1",
+    "1_to_n",
+    "llm",
+    "payout",
+    "settlement",
+    "reimbursement",
+    "evidence",
+)
 
 
 def _statement_reports():
@@ -63,70 +74,70 @@ def _format_statement(reports):
     return "\n".join(lines)
 
 
-def _format_summary(counts, links, lines):
-    # type: (dict, list, list) -> str
-    by_line = {}
-    for link in links:
-        by_line.setdefault(link.bank_line_id, []).append(link.method)
+def _format_summary(links):
+    # type: (list) -> str
     tally = {}
-    for name in METHODS:
-        tally[name] = 0
-    for line in lines:
-        methods = by_line.get(line.id) or []
-        if not methods or line.status == "unsupported":
-            key = "unsupported"
-        elif len(set(methods)) == 1:
-            key = methods[0]
-        else:
-            key = methods[0]
-        if key not in tally:
-            tally[key] = 0
-        tally[key] += 1
-    rows = ["links by bank line"]
+    for link in links:
+        tally[link.method] = tally.get(link.method, 0) + 1
+    rows = ["links by method"]
     for name in METHODS:
         rows.append("%s: %d" % (name, tally.get(name, 0)))
     for name in sorted(tally):
         if name not in METHODS:
             rows.append("%s: %d" % (name, tally[name]))
-    rows.append("new link rows this run: %s" % ", ".join(
-        "%s %s" % (name, counts.get(name, 0)) for name in ("reference", "exact", "n_to_1", "1_to_n", "llm")
-    ))
+    rows.append("link rows: %d" % len(links))
     return "\n".join(rows)
+
+
+def _link_sort(link):
+    # type: (Link) -> tuple
+    amount = link.allocated_amount
+    if link.method == "evidence" or amount == 0:
+        return (2, link.id or 0)
+    if amount < 0:
+        return (1, link.id or 0)
+    return (0, -amount, link.id or 0)
 
 
 def _format_table(session, links, lines):
     # type: (Session, list, list) -> str
+    from app.money import ZERO, to_money
+
     documents = {}
     for document in session.exec(select(Document)).all():
         documents[document.id] = document
-    lines_by_id = {}
+    by_line = {}
+    for link in links:
+        by_line.setdefault(link.bank_line_id, []).append(link)
+    rows = ["links by bank line"]
     for line in lines:
-        lines_by_id[line.id] = line
-    rows = [
-        "links",
-        "line | date | bank_amount | method | doc | document | allocated | confidence | explanation",
-    ]
-    ordered = sorted(links, key=lambda link: (lines_by_id[link.bank_line_id].movement_date, link.bank_line_id, link.id or 0))
-    for link in ordered:
-        line = lines_by_id.get(link.bank_line_id)
-        document = documents.get(link.document_id)
-        number = document.document_number if document is not None else "?"
-        entity = document.entity if document is not None else "?"
         rows.append(
-            "%s | %s | %s | %s | %s | %s %s | %s | %.2f | %s"
-            % (
-                link.bank_line_id,
-                line.movement_date.isoformat() if line is not None else "",
-                line.amount if line is not None else "",
-                link.method,
-                link.document_id,
-                number,
-                entity,
-                link.allocated_amount,
-                link.confidence,
-                link.explanation,
-            )
+            "line %s | %s | %s | %s"
+            % (line.id, line.movement_date.isoformat(), line.amount, line.description)
         )
+        group = sorted(by_line.get(line.id, []), key=_link_sort)
+        if not group:
+            rows.append("  (no documents)")
+            continue
+        total = ZERO
+        for link in group:
+            total = to_money(total + to_money(link.allocated_amount))
+            document = documents.get(link.document_id)
+            number = document.document_number if document is not None else "?"
+            entity = document.entity if document is not None else "?"
+            rows.append(
+                "  doc %s | %s | %s | allocated %s | %s | %.2f | %s"
+                % (
+                    link.document_id,
+                    number,
+                    entity,
+                    to_money(link.allocated_amount),
+                    link.method,
+                    link.confidence,
+                    link.explanation,
+                )
+            )
+        rows.append("  allocated sum %s" % to_money(total))
     unsupported = [line for line in lines if line.status == "unsupported"]
     rows.append("")
     rows.append("unsupported")
@@ -140,12 +151,154 @@ def _format_table(session, links, lines):
     return "\n".join(rows)
 
 
+def _format_tasks(items):
+    # type: (list) -> str
+    rows = ["owner tasks"]
+    if not items:
+        rows.append("(none)")
+        return "\n".join(rows)
+    for item in items:
+        rows.append(
+            "%s | %s | %s | %s | %s | %s"
+            % (
+                item.id,
+                item.period,
+                item.kind,
+                item.status,
+                item.amount,
+                item.description,
+            )
+        )
+    return "\n".join(rows)
+
+
+def _format_balances(balances):
+    # type: (list) -> str
+    rows = ["partial receipts"]
+    if not balances:
+        rows.append("(none)")
+        return "\n".join(rows)
+    for invoice in balances:
+        rows.append(
+            "%s | %s | invoice %s | remaining open %s"
+            % (
+                invoice.get("document_number"),
+                invoice.get("entity"),
+                invoice.get("invoice_total"),
+                invoice.get("remaining_open"),
+            )
+        )
+        for step in invoice.get("receipts") or []:
+            rows.append(
+                "  %s | %s | %s | remaining open %s"
+                % (
+                    step.get("date"),
+                    step.get("document_number"),
+                    step.get("amount"),
+                    step.get("remaining_open"),
+                )
+            )
+    return "\n".join(rows)
+
+
 def _checklist(month):
     # type: (str) -> dict
     client = TestClient(app)
     response = client.get("/periods/%s/checklist" % month)
     response.raise_for_status()
     return response.json()
+
+
+def _print_response(response):
+    # type: (object) -> None
+    print("HTTP %s" % response.status_code)
+    try:
+        print(json.dumps(response.json(), indent=2, ensure_ascii=False))
+    except ValueError:
+        print(response.text)
+
+
+def _approval_reason(row):
+    # type: (dict) -> str
+    kind = row.get("kind")
+    text = (row.get("item") or "").lower()
+    if kind == "missing_sales_invoice":
+        return (
+            "The guest sales invoice was not issued. Accepted so this month can close. "
+            "Issuing the invoice remains a legal obligation."
+        )
+    if "ptdomain" in text or "renovacao" in text or "renovação" in text:
+        return "Lost invoice: the domain renewal document cannot be obtained."
+    if "santos" in text:
+        return "Unidentified transfer: the supporting document cannot be obtained."
+    return (
+        "The document is lost or cannot be obtained. "
+        "Owner accepts this item so the month can close."
+    )
+
+
+def _reopen_for_demo(month):
+    # type: (str) -> bool
+    """A previous demonstration may have closed the month. Show the flow again."""
+    with Session(engine) as session:
+        period = session.exec(select(Period).where(Period.month == month)).first()
+        if period is None or period.status != "closed":
+            return False
+        period.status = "open"
+        period.closed_at = None
+        session.add(period)
+        session.commit()
+    return True
+
+
+def _demonstrate_close(month):
+    # type: (str) -> None
+    if _reopen_for_demo(month):
+        print(
+            "period %s was closed; reopened so the close flow can be demonstrated"
+            % month
+        )
+        print("")
+    client = TestClient(app)
+    print("POST /periods/%s/close" % month)
+    refused = client.post("/periods/%s/close" % month)
+    _print_response(refused)
+    print("")
+    body = refused.json()
+    detail = body.get("detail") if isinstance(body, dict) else {}
+    if not isinstance(detail, dict):
+        detail = {}
+    approvals = []
+    for rows in (detail.get("blockers_by_kind") or {}).values():
+        for row in rows:
+            if row.get("id") is None:
+                continue
+            approvals.append({"id": row["id"], "reason": _approval_reason(row)})
+    if refused.status_code != 409 or not approvals:
+        print("close was not refused for pending items; approval step skipped")
+        return
+    stamp = datetime.utcnow().replace(microsecond=0)
+    request = {
+        "approvals": approvals,
+        "approved_by": "owner",
+        "timestamp": stamp.isoformat(),
+    }
+    print("POST /periods/%s/close" % month)
+    print(json.dumps(request, indent=2, ensure_ascii=False))
+    approved = client.post("/periods/%s/close" % month, json=request)
+    _print_response(approved)
+    print("")
+    print("GET /reports/%s accepted_pending_items" % month)
+    report = client.get("/reports/%s" % month)
+    report.raise_for_status()
+    payload = report.json()
+    print(
+        json.dumps(
+            {"accepted_pending_items": payload.get("accepted_pending_items")},
+            indent=2,
+            ensure_ascii=False,
+        )
+    )
 
 
 def main():
@@ -166,17 +319,32 @@ def main():
     print(_format_statement(_statement_reports()))
     print("")
     with Session(engine, expire_on_commit=False) as session:
-        counts = link_all(session, relink=args.relink)
+        link_all(session, relink=args.relink)
         links = session.exec(select(Link).order_by(Link.bank_line_id, Link.id)).all()
         lines = session.exec(
             select(BankLine).order_by(BankLine.movement_date, BankLine.id)
         ).all()
-        print(_format_summary(counts, links, lines))
+        tasks = session.exec(select(OpenItem).order_by(OpenItem.id)).all()
+        owner_tasks = [
+            item
+            for item in tasks
+            if item.kind in ("missing_document", "missing_sales_invoice", "invoice_to_request")
+            and item.status in ("open", "accepted_by_owner")
+            and (item.period or "") >= "2026-09"
+        ]
+        print(_format_summary(links))
         print("")
         print(_format_table(session, links, lines))
+        print("")
+        print(_format_tasks(owner_tasks))
+    print("")
+    checklist = _checklist(args.month)
+    print(_format_balances(checklist.get("invoice_open_balances") or []))
     print("")
     print("GET /periods/%s/checklist" % args.month)
-    print(json.dumps(_checklist(args.month), indent=2, ensure_ascii=False))
+    print(json.dumps(checklist, indent=2, ensure_ascii=False))
+    print("")
+    _demonstrate_close(args.month)
 
 
 if __name__ == "__main__":

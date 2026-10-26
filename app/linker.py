@@ -1,7 +1,9 @@
 """Link each bank line to the documents that support it.
 
 Deterministic passes run first (reference, exact amount, N:1, 1:N).
-What is left goes to the model. Code checks that every proposal sums to the line.
+What is left goes to the model. A completion pass then attaches every
+document that supports the line (payout, settlement, reimbursement).
+Code checks that every proposal sums to the line.
 """
 import json
 import logging
@@ -999,7 +1001,7 @@ def clear_links(session):
         session.add(line)
     for item in session.exec(select(OpenItem)).all():
         notes = item.notes or ""
-        if item.kind == "missing_document" and "linker:" in notes:
+        if item.kind in ("missing_document", "missing_sales_invoice") and "linker:" in notes:
             session.delete(item)
     session.commit()
 
@@ -1037,9 +1039,17 @@ def link_all(session, relink=False):
     existing = session.exec(select(Link)).all()
     book = AllocationBook(existing)
     counts["llm"] = pass_llm(session, book, lines, documents)
+    session.commit()
+    from app.complete import complete_link_sets
+
+    for key, value in complete_link_sets(session).items():
+        counts[key] = value
+    session.commit()
     lines = session.exec(
         select(BankLine).order_by(BankLine.movement_date, BankLine.id)
     ).all()
+    existing = session.exec(select(Link)).all()
+    book = AllocationBook(existing)
     counts["unsupported"] = mark_unsupported(session, book, lines)
     session.commit()
     return counts
