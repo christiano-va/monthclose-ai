@@ -20,6 +20,7 @@ from app.models import (
     Period,
 )
 from app.money import money_equal, to_money
+from app.posting import excluded_from_linking
 from app.statements import import_statement_text
 
 MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
@@ -147,6 +148,10 @@ def create_document(
         status=payload.status,
         notes=payload.notes,
         file_path=payload.file_path,
+        original_filename=payload.original_filename,
+        direction=payload.direction,
+        referenced_invoice=payload.referenced_invoice,
+        lines_json=payload.lines_json,
         drive_link=payload.drive_link,
         confidence=payload.confidence,
         justification=payload.justification,
@@ -220,6 +225,17 @@ def create_link(
     document = session.get(Document, payload.document_id)
     if document is None:
         raise HTTPException(status_code=404, detail="document not found")
+    category = (
+        session.get(Category, document.category_id) if document.category_id else None
+    )
+    category_code = category.code if category is not None else None
+    if excluded_from_linking(category_code, document.notes):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "suspect documents have no accounting entry and are excluded from linking"
+            ),
+        )
     bank_line = session.get(BankLine, payload.bank_line_id)
     if bank_line is None:
         raise HTTPException(status_code=404, detail="bank line not found")

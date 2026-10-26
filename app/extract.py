@@ -10,6 +10,7 @@ from app.llm import llm_json
 from app.mailbox import MailMessage
 from app.models import Category, Document
 from app.money import to_money
+from app.settings import FINAL_CONSUMER_NIF, company_nif
 from app.validate import parse_money_field
 
 EXTRACT_SCHEMA = {
@@ -19,13 +20,20 @@ EXTRACT_SCHEMA = {
         "document_kind",
         "document_type",
         "issuer_name",
+        "issuer_nif",
         "nif",
+        "recipient_name",
+        "recipient_nif",
+        "payee_name",
+        "payee_nif",
         "document_number",
         "date",
         "due_date",
         "base",
         "vat_per_rate",
         "total",
+        "total_payable",
+        "lines",
         "amount",
         "gross",
         "deductions",
@@ -38,6 +46,8 @@ EXTRACT_SCHEMA = {
         "confidence",
         "justification",
         "risk_flags",
+        "settles_invoice",
+        "referenced_invoice",
     ],
     "properties": {
         "document_kind": {
@@ -56,7 +66,14 @@ EXTRACT_SCHEMA = {
         },
         "document_type": {"type": "string"},
         "issuer_name": {"type": "string"},
+        "issuer_nif": {"type": ["string", "null"]},
         "nif": {"type": ["string", "null"]},
+        "recipient_name": {"type": "string"},
+        "recipient_nif": {"type": ["string", "null"]},
+        "payee_name": {"type": ["string", "null"]},
+        "payee_nif": {"type": ["string", "null"]},
+        "settles_invoice": {"type": "boolean"},
+        "referenced_invoice": {"type": ["string", "null"]},
         "document_number": {"type": "string"},
         "date": {"type": "string"},
         "due_date": {"type": ["string", "null"]},
@@ -80,6 +97,26 @@ EXTRACT_SCHEMA = {
             },
         },
         "total": {"type": "string"},
+        "total_payable": {"type": "string"},
+        "lines": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["description", "base", "vat_rate", "vat", "total", "nature"],
+                "properties": {
+                    "description": {"type": "string"},
+                    "base": {"type": "string"},
+                    "vat_rate": {"type": "string"},
+                    "vat": {"type": "string"},
+                    "total": {"type": "string"},
+                    "nature": {
+                        "type": "string",
+                        "enum": ["supply", "fee", "topup", "tax", "other"],
+                    },
+                },
+            },
+        },
         "currency": {"type": "string"},
         "description": {"type": "string"},
         "suggested_category": {"type": ["string", "null"]},
@@ -116,9 +153,13 @@ def _norm_nif(value):
 
 def lookup_issuer_category(session, nif):
     # type: (Session, Optional[str]) -> Optional[Category]
-    """Latest history category for this issuer NIF. Inbox rows are not history."""
+    """Latest history category for this counterparty NIF. Inbox rows are not history.
+
+    The company's own NIF is never a counterparty key. 999999990 is a valid
+    final-consumer NIF shared by lodging and 3D sales, so it is not one memory.
+    """
     wanted = _norm_nif(nif)
-    if not wanted:
+    if not wanted or wanted == company_nif() or wanted == FINAL_CONSUMER_NIF:
         return None
     rows = session.exec(
         select(Document)
@@ -159,13 +200,19 @@ def extract_pdf_document(pdf_bytes, message, categories, text=None):
     if "@" in (message.sender or ""):
         sender_domain = message.sender.split("@")[-1].rstrip(">")
 
+    our_nif = company_nif()
     prompt_parts = [
         "Extract the accounting document from this PDF.",
-        "The company closing the books is Nortavia Digital, NIF 511588135.",
-        "issuer_name and nif are the entity that ISSUED the document.",
-        "On a purchase, the issuer is the supplier, not Nortavia.",
-        "On a sale or receipt issued by Nortavia, the issuer is Nortavia Digital and nif is 511588135.",
-        "Do not swap the customer and the issuer.",
+        "The company closing the books is Nortavia Digital, NIF %s." % our_nif,
+        "Ignore the vertical watermark (one letter per line). Read the real lines.",
+        "issuer_name and issuer_nif are who ISSUED the document. nif is the same value as issuer_nif.",
+        "recipient_name and recipient_nif are who the document is addressed to (customer, supplier's client, worker, taxpayer or tenant).",
+        "On a purchase the issuer is the supplier and the recipient is Nortavia (NIF %s)." % our_nif,
+        "On a sale, fatura-recibo or recibo issued by Nortavia, the issuer NIF is %s and the recipient is the customer." % our_nif,
+        "Do not put the customer in issuer_nif. Do not put Nortavia in issuer_nif unless Nortavia issued the document.",
+        "On a tax guide the header NIF is often zeros. Leave issuer_nif null. issuer_name is Segurança Social or Autoridade Tributária. recipient_nif is %s." % our_nif,
+        "payee_name and payee_nif are who receives the money on a bank payment proof or a payment notice. On a payment proof the issuer is the bank and the payee is the entity paid (Segurança Social, Autoridade Tributária), not the account holder. On an ordinary invoice payee_name and payee_nif are null.",
+        "NIF 999999990 is valid. Use it when the customer is a final consumer (consumidor final).",
         "document_kind is exactly one of: invoice, receipt, payslip, tax_guide, payment_proof, payment_notice, bank_statement, payout_report, other.",
         "Use invoice for faturas, faturas-recibo, notas de crédito and notas de débito (including VAT-exempt bank fee notes).",
         "Use receipt for payment receipts (recibo / RG), rent receipts and donation receipts.",
@@ -173,19 +220,28 @@ def extract_pdf_document(pdf_bytes, message, categories, text=None):
         "Use payment_proof for a bank comprovativo de pagamento. Use payment_notice for an aviso de pagamento.",
         "Use bank_statement for an extrato de conta. Use payout_report for a platform payout report. Use other for an expense reimbursement note.",
         "document_type is a short label such as fatura, fatura-recibo, recibo, nota_credito, guia, comprovativo, recibo_vencimento, extrato.",
-        "nif is the tax id of the entity that ISSUED the document, copied as printed.",
-        "Portuguese issuers have a 9-digit NIF. Foreign issuers have an EU VAT id (for example IE1234567X) or another non-Portuguese id. Do not rewrite a foreign id into 9 digits.",
-        "On a tax guide, if the header NIF is zeros, use the taxpayer NIF printed for Nortavia (511588135) when it is on the document.",
-        "Money fields are strings with a dot decimal and two places (example 184.50). Copy the figures. Do not invent amounts.",
+        "Portuguese tax ids are 9 digits. Foreign issuers have an EU VAT id (for example IE1234567X). Do not rewrite a foreign id into 9 digits. Do not replace a zero NIF with %s." % our_nif,
+        "Money fields are strings with a dot decimal and two places (example 184.50). A negative amount has a leading minus. Copy the figures. Do not invent amounts.",
+        "total_payable is the amount that is payable or that was paid: the invoice TOTAL, total a pagar, importância recebida, líquido, or net payout. It is not the smallest line.",
+        "lines lists every economic line. Each line total includes that line's VAT (base + vat = total). vat_rate is 0, 6, 13 or 23. Reverse charge and isento use vat_rate 0 and vat 0.00.",
+        "The sum of line totals must equal total_payable. A withholding is a negative line. A host fee deducted from a payout is a negative fee line.",
+        "nature is supply for the goods or service, fee for a commission or platform charge, topup for a balance load or meal-card credit, tax for stamp duty or a tax line, other otherwise.",
+        "A meal-card top-up plus its commission are two natures: the load is topup and the commission is fee. Do not drop the load. Do not put the load in the fee line.",
+        "On a rent receipt, one positive supply line is the gross rent and one negative tax line is the IRS withholding. total_payable is the amount received.",
+        "On a payout report, each stay is a supply line whose total is the gross guest charge, and the host fee is a negative fee line. total_payable is the net paid to the host.",
+        "settles_invoice is true only when this document settles an invoice that was already issued: a payment notice (aviso de pagamento), a recibo (RG) that lists documentos liquidados, or a payout of stays already invoiced.",
+        "A fatura or fatura-recibo is the invoice itself: settles_invoice is false and referenced_invoice is null.",
+        "A rent receipt or a donation receipt does not settle an earlier invoice: settles_invoice is false and referenced_invoice is null.",
+        "referenced_invoice is the invoice number being settled, copied as printed (example FT 2026A/0008). Several numbers are separated by a comma. Null when nothing is settled.",
         "iban is the account the document asks someone to pay, copied as printed, or null if none is printed.",
-        "For invoice and receipt: fill base, vat_per_rate and total. vat_per_rate has one object per printed VAT rate (0, 6, 13 or 23).",
-        "If an invoice or receipt shows no VAT, use one line with rate \"0\", vat \"0.00\", and base equal to total. amount equals total. gross, deductions and net are null.",
-        "On a rent receipt, total is the amount received. When no VAT is charged, base equals that amount; describe any IRS withholding in the description, not as VAT.",
-        "For a payslip: gross is the sum of every earning, deductions is the sum of every deduction, net is the take-home pay, and gross - deductions must equal net.",
-        "A meal allowance shown both as an earning and as a deduction belongs in both gross and deductions. amount and total equal net. vat_per_rate is an empty list. base may equal gross.",
-        "For tax_guide, payment_proof, payment_notice and payout_report: amount is the single sum printed (amount due, amount paid, or total payout). total and base equal amount. vat_per_rate is empty. gross, deductions and net are null.",
-        "For bank_statement: amount is the closing balance. vat_per_rate is empty.",
-        "For other: amount is the total to pay or reimburse. vat_per_rate is empty.",
+        "For invoice and receipt: fill base, vat_per_rate, total, total_payable and lines. vat_per_rate has one object per printed VAT rate (0, 6, 13 or 23). total equals total_payable for a normal invoice.",
+        "If an invoice or receipt shows no VAT, vat_per_rate has one object with rate \"0\", vat \"0.00\", and base equal to total. amount equals total_payable. gross, deductions and net are null.",
+        "For a payslip: the recipient is the worker, not the company. gross is the sum of every earning, deductions is the sum of every deduction, net is the take-home pay, and gross - deductions must equal net.",
+        "A meal allowance shown both as an earning and as a deduction belongs in both gross and deductions. amount, total and total_payable equal net. Lines are positive earnings and negative deductions and must sum to net. vat_per_rate is empty. base may equal gross.",
+        "For tax_guide and payment_proof: amount is the sum due or paid. total, base and total_payable equal amount. Lines may repeat that single sum with nature tax and vat 0. gross, deductions and net are null.",
+        "For payment_notice: total_payable is the amount transferred. Lines are the invoices being paid. referenced_invoice is those invoice numbers. settles_invoice is true.",
+        "For bank_statement: amount and total_payable are the closing balance. lines is an empty list. vat_per_rate is empty. settles_invoice is false. referenced_invoice is null.",
+        "For other (a reimbursement note): amount and total_payable are the total to reimburse. Lines are the expenses with vat 0. vat_per_rate is empty. settles_invoice is false.",
         "confidence is 0-1. Lower it when the text is ambiguous or a figure is unclear.",
         "justification is one line.",
         "risk_flags may contain only these names: iban_new, iban_changed, urgency_language, short_payment_deadline, personal_account.",
@@ -245,16 +301,24 @@ def classify_unknown_issuer(extracted, categories, pdf_text_value, message):
     prompt = "\n".join(
         [
             "Choose the bookkeeping category for this document.",
-            "The company is Nortavia Digital, NIF 511588135.",
+            "The company is Nortavia Digital, NIF %s." % company_nif(),
             "Answer with one category code copied exactly from the allowed list.",
-            "Codes starting with REC_ are income issued by the company.",
-            "Other codes are costs, assets, payroll, tax, or other postings.",
+            "direction sale means the company issued the document: choose a REC_ code from the main line.",
+            "Alojamento, estadia or noites is REC_AL. Impressão 3D is REC_3D. Consultoria is REC_CONSULTORIA.",
+            "direction purchase is a cost, asset, payroll or tax. Do not choose a REC_ code.",
+            "Classify the main line (the largest amount). Do not classify the document by a smaller fee, commission or stamp-duty line.",
+            "A meal-card top-up (subsídio de refeição, carregamento) is PESSOAL_REMUNERACOES.",
+            "Office furniture and equipment used for more than a year (a chair, a computer) is EQUIPAMENTO_ADMIN. A 3D printer is EQUIPAMENTO_3D.",
+            "IRS withholdings (retenções na fonte) have no ledger category: answer UNMAPPED.",
             "confidence is 0-1 for this classification. justification is one line.",
             "",
+            "direction: %s" % (extracted.get("direction") or ""),
             "document_kind: %s" % (extracted.get("document_kind") or ""),
             "document_type: %s" % (extracted.get("document_type") or ""),
+            "counterparty: %s" % (extracted.get("counterparty_name") or extracted.get("issuer_name") or ""),
+            "counterparty_nif: %s" % (extracted.get("nif") or ""),
             "issuer_name: %s" % (extracted.get("issuer_name") or ""),
-            "nif: %s" % (extracted.get("nif") or ""),
+            "main_line: %s" % (extracted.get("main_line") or ""),
             "document_number: %s" % (extracted.get("document_number") or ""),
             "description: %s" % (extracted.get("description") or ""),
             "email subject: %s" % (message.subject or ""),

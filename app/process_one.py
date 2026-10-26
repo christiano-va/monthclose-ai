@@ -19,22 +19,55 @@ from app.extract import (
     classify_category,
     classify_plain_email,
     extract_pdf_document,
-    guess_tipo,
     list_categories,
     pdf_text,
-    primary_vat,
 )
 from app.mailbox import Attachment, LocalEmlMailbox, MailMessage
-from app.models import Document, Link, OpenItem, Period
-from app.money import ZERO
+from app.models import Category, Document, Link, OpenItem, Period
+from app.money import ZERO, money_equal, to_money
+from app.posting import (
+    CATEGORY_SETTLEMENT,
+    CATEGORY_SUSPECT,
+    OWNER_TASK_KINDS,
+    TIPO_SUSPECT,
+    deductible_vat,
+    ensure_category,
+    ensure_special_categories,
+    excluded_from_linking,
+    find_referenced_invoices,
+    group_by_nature,
+    is_company_nif,
+    is_final_consumer,
+    is_fixed_asset,
+    is_meal_topup,
+    is_settlement,
+    is_tax_or_social,
+    main_line,
+    norm_nif,
+    party_label,
+    primary_rate,
+    resolve_counterparty,
+    resolve_direction,
+    resolve_tipo,
+    settlement_account,
+    should_split_lines,
+    sum_lines,
+    task_assignee,
+    tax_category_code,
+    asset_category_code,
+    consumer_sale_category,
+)
 from app.statements import import_statement_text
 from app.validate import (
     classify_nif,
     find_ibans,
+    align_line_rounding,
+    line_items,
     normalize_document_kind,
     normalize_iban,
     parse_iso_date,
     parse_money_field,
+    total_payable_amount,
     resolve_risk_flags,
     validate_extraction,
 )
@@ -45,6 +78,8 @@ logger = logging.getLogger("app.process")
 LOW_CONFIDENCE_THRESHOLD = 0.8
 
 _HOURS_RE = re.compile(r"(\d{1,4})\s+horas", re.IGNORECASE)
+_BOOKING_RE = re.compile(r"\b([A-Z]{2,}\d[A-Z0-9]{2,})\b")
+ATTACH_DIR = ROOT / "data" / "attachments"
 
 
 def _get_or_create_period(session, month):
@@ -463,13 +498,17 @@ def process_email_without_pdf(session, message, eml_path, reprocess=False):
             due = due + timedelta(days=30)
         elif due is not None:
             due = None
+        draft = _draft_invoice_email(counterparty, hours, period)
         if hours:
             description = (
-                "Accountant: issue invoice to %s for %s approved hours"
-                % (counterparty, hours)
+                "Owner: approve the draft email asking the accountant to issue "
+                "the sales invoice to %s for %s hours" % (counterparty, hours)
             )
         else:
-            description = "Accountant: issue invoice to %s" % counterparty
+            description = (
+                "Owner: approve the draft email asking the accountant to issue "
+                "the sales invoice to %s" % counterparty
+            )
         notes = " | ".join(
             [
                 "source_id: %s" % source_id,
@@ -490,6 +529,8 @@ def process_email_without_pdf(session, message, eml_path, reprocess=False):
                 due_date=due,
                 status="open",
                 notes=notes,
+                assignee=task_assignee("invoice_to_request"),
+                draft_email=draft,
                 confidence=confidence,
                 justification=justification or "Hours approved; invoice still to issue.",
             )
@@ -505,6 +546,8 @@ def process_email_without_pdf(session, message, eml_path, reprocess=False):
             existing.due_date = due
             existing.status = "open"
             existing.notes = notes
+            existing.assignee = task_assignee("invoice_to_request")
+            existing.draft_email = draft
             existing.confidence = confidence
             existing.justification = justification or existing.justification
             session.add(existing)
@@ -536,70 +579,452 @@ def process_email_without_pdf(session, message, eml_path, reprocess=False):
     )
 
 
+def _draft_invoice_email(counterparty, hours, period):
+    # type: (str, str, str) -> str
+    """Draft only. The owner approves it; nothing is sent to the accountant."""
+    subject = "Pedido de emissão de fatura — %s — %s" % (counterparty, period)
+    if hours:
+        detail = "O cliente %s aprovou %s horas de %s." % (counterparty, hours, period)
+    else:
+        detail = "Há uma fatura de venda por emitir a %s (%s)." % (counterparty, period)
+    body = (
+        "Bom dia,\n\n%s "
+        "Peço a emissão da fatura, com o prazo de pagamento habitual.\n\n"
+        "Obrigado."
+    ) % detail
+    return "To: accountant\nSubject: %s\n\n%s" % (subject, body)
+
+
+def _save_attachment(data, original_filename):
+    # type: (bytes, str) -> Path
+    ATTACH_DIR.mkdir(parents=True, exist_ok=True)
+    digest = hashlib.sha256(data).hexdigest()[:16]
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", original_filename or "attachment.pdf")
+    cleaned = cleaned.strip("._") or "attachment.pdf"
+    path = ATTACH_DIR / ("%s_%s" % (digest, cleaned))
+    if not path.exists():
+        path.write_bytes(data)
+    return path
+
+
+def _lines_json(lines):
+    # type: (list) -> str
+    payload = []
+    for line in lines:
+        payload.append(
+            {
+                "description": line.get("description") or "",
+                "base": str(line["base"]),
+                "vat_rate": str(line["vat_rate"]),
+                "vat": str(line["vat"]),
+                "total": str(line["total"]),
+                "nature": line.get("nature") or "supply",
+            }
+        )
+    return json.dumps(payload, ensure_ascii=False)
+
+
+def _category_by_code(session, code):
+    # type: (Session, Optional[str]) -> Optional[Category]
+    if not code:
+        return None
+    return session.exec(select(Category).where(Category.code == code)).first()
+
+
+def _correct_kind(kind, extracted, text):
+    # type: (str, Dict[str, Any], str) -> str
+    """Keep a fatura-recibo as the invoice, not as a settlement receipt."""
+    head = (text or "")[:600].upper()
+    if "FATURA-RECIBO" in head or "FATURA RECIBO" in head:
+        extracted["settles_invoice"] = False
+        extracted["referenced_invoice"] = None
+        return "invoice"
+    if "RECIBO DE VENCIMENTO" in head:
+        return "payslip"
+    if "AVISO DE PAGAMENTO" in head:
+        return "payment_notice"
+    if "COMPROVATIVO DE PAGAMENTO" in head:
+        return "payment_proof"
+    if "PAYOUT REPORT" in head:
+        return "payout_report"
+    if "GUIA DE PAGAMENTO" in head or "DOCUMENTO DE PAGAMENTO" in head:
+        return "tax_guide"
+    if "NOTA DE DESPESAS" in head or "PEDIDO DE REEMBOLSO" in head:
+        return "other"
+    return kind
+
+
+def _retag_meal_card(lines, text):
+    # type: (list, str) -> list
+    """A top-up bundled with a fee must not be booked as the fee."""
+    blob = (text or "").lower()
+    if "carreg" not in blob or "comiss" not in blob:
+        return lines
+    for line in lines:
+        desc = (line.get("description") or "").lower()
+        if "comiss" in desc:
+            line["nature"] = "fee"
+        elif "carreg" in desc or abs(line["total"]) >= to_money("20"):
+            line["nature"] = "topup"
+    return lines
+
+
+def _is_credit_note(extracted, text):
+    # type: (Dict[str, Any], str) -> bool
+    blob = " ".join(
+        [
+            str(extracted.get("document_type") or ""),
+            str(extracted.get("document_number") or ""),
+            (text or "")[:800],
+        ]
+    ).lower()
+    return (
+        "nota de crédito" in blob
+        or "nota de credito" in blob
+        or "credit note" in blob
+    )
+
+
+def _negate(value):
+    # type: (Any) -> Any
+    amount = to_money(value)
+    if amount > ZERO:
+        return to_money(-amount)
+    return amount
+
+
+def _select_category(
+    session, extracted, text, message, kind, direction, counterparty_nif, line_text, nature
+):
+    # type: (Session, Dict[str, Any], str, MailMessage, str, str, Optional[str], str, str) -> Tuple[Optional[Category], float, str, str, str]
+    """History memory uses the counterparty NIF. Rules cover the systematic cases."""
+    if kind == "payslip":
+        category = _category_by_code(session, "PESSOAL_REMUNERACOES")
+        code = category.code if category is not None else "PESSOAL_REMUNERACOES"
+        return (
+            category,
+            0.95,
+            "Payslip of the worker; category PESSOAL_REMUNERACOES.",
+            "rule",
+            code,
+        )
+
+    if is_tax_or_social(kind, text, extracted.get("counterparty_name") or ""):
+        code = tax_category_code(text, extracted.get("counterparty_name") or "")
+        if code:
+            category = _category_by_code(session, code)
+            return (
+                category,
+                0.95,
+                "Tax or social-security document; category %s." % code,
+                "rule",
+                code,
+            )
+        return (
+            None,
+            0.7,
+            "IRS withholdings have no category in the ledger.",
+            "rule",
+            "UNMAPPED",
+        )
+
+    if nature != "fee" and (nature == "topup" or is_meal_topup(line_text)):
+        category = _category_by_code(session, "PESSOAL_REMUNERACOES")
+        code = category.code if category is not None else "PESSOAL_REMUNERACOES"
+        return (
+            category,
+            0.9,
+            "Main item is a meal-card top-up, not the smaller loading fee.",
+            "rule",
+            code,
+        )
+
+    if direction == "purchase" and is_fixed_asset(line_text):
+        code = asset_category_code(line_text)
+        category = _category_by_code(session, code)
+        return (
+            category,
+            0.9,
+            "Main line is a fixed asset (%s), not a consumable." % code,
+            "rule",
+            code,
+        )
+
+    if direction == "sale" and is_final_consumer(counterparty_nif):
+        code = consumer_sale_category(line_text)
+        if code:
+            category = _category_by_code(session, code)
+            return (
+                category,
+                0.92,
+                "Final-consumer NIF is shared; the main line selects %s." % code,
+                "rule",
+                code,
+            )
+
+    extracted["main_line"] = line_text
+    extracted["direction"] = direction
+    if line_text:
+        extracted["description"] = line_text
+    return classify_category(session, extracted, list_categories(session), text, message)
+
+
+def _sale_category_ok(category, kind):
+    # type: (Optional[Category], str) -> bool
+    if category is None or kind == "payslip":
+        return True
+    code = category.code
+    if code.startswith("REC_"):
+        return True
+    if code.startswith("PESSOAL_") or code.startswith("ESTADO_") or code.startswith("EQUIPAMENTO_"):
+        return True
+    if code in (CATEGORY_SETTLEMENT, CATEGORY_SUSPECT):
+        return True
+    return False
+
+
+def _snapshot(session, document):
+    # type: (Session, Document) -> Dict[str, str]
+    old_code = ""
+    if document.category_id:
+        row = session.get(Category, document.category_id)
+        old_code = row.code if row is not None else ""
+    return {
+        "category": old_code,
+        "tipo": document.tipo or "",
+        "counterparty": party_label(document.entity, document.nif),
+    }
+
+
+def _changes(document_id, old, new_category, new_tipo, new_party):
+    # type: (Optional[int], Optional[Dict[str, str]], str, str, str) -> List[Dict[str, Any]]
+    if old is None:
+        return []
+    rows = []
+    pairs = (
+        ("category", old["category"], new_category),
+        ("tipo", old["tipo"], new_tipo),
+        ("counterparty", old["counterparty"], new_party),
+    )
+    for field, previous, current in pairs:
+        if previous != current:
+            rows.append(
+                {
+                    "id": document_id,
+                    "field": field,
+                    "old": previous,
+                    "new": current,
+                }
+            )
+    return rows
+
+
+def _find_sale(session, description, amount):
+    # type: (Session, str, Any) -> Optional[Document]
+    tokens = re.findall(r"[A-Za-zÀ-ÿ]{4,}", description or "")
+    rows = session.exec(select(Document).where(Document.tipo == "receita")).all()
+    inbox = []
+    for document in rows:
+        if document.justification == "loaded from data/history JSON":
+            continue
+        inbox.append(document)
+    for document in inbox:
+        entity = (document.entity or "").lower()
+        for token in tokens:
+            if token.lower() in entity:
+                return document
+    if amount is not None:
+        for document in inbox:
+            if money_equal(document.total, amount):
+                return document
+    return None
+
+
+def _record_missing_sale(
+    session, email_name, source_id, period, description, amount, reference, document_id
+):
+    # type: (Session, str, str, str, str, Any, str, Optional[int]) -> Optional[int]
+    marker = "missing:%s:%s" % (source_id, reference or description[:40])
+    rows = session.exec(
+        select(OpenItem).where(OpenItem.kind == "missing_document")
+    ).all()
+    notes = " | ".join(
+        [
+            marker,
+            "email: %s" % email_name,
+            "reference: %s" % (reference or "-"),
+        ]
+    )
+    label = reference or _one_line(description) or "a stay"
+    text = (
+        "Owner: missing sales invoice for %s (%s). "
+        "Obtain the document; nothing is sent to the accountant automatically."
+        % (label, amount)
+    )
+    for item in rows:
+        if item.notes and marker in item.notes:
+            item.assignee = "owner"
+            item.description = text
+            item.amount = to_money(amount)
+            item.period = period
+            item.document_id = document_id
+            item.notes = notes
+            item.status = "open"
+            session.add(item)
+            session.commit()
+            return item.id
+    _get_or_create_period(session, period)
+    item = OpenItem(
+        document_id=document_id,
+        period=period,
+        kind="missing_document",
+        description=text,
+        amount=to_money(amount),
+        due_date=None,
+        status="open",
+        notes=notes,
+        assignee="owner",
+        confidence=0.85,
+        justification="Payout lists a stay with no sales invoice in the mailbox.",
+    )
+    session.add(item)
+    session.commit()
+    session.refresh(item)
+    return item.id
+
+
+def _missing_sales(session, email_name, source_id, period, lines, document_id):
+    # type: (Session, str, str, str, list, Optional[int]) -> List[str]
+    """Bookings on a payout that have no sales invoice become owner tasks."""
+    matched = []
+    for line in lines:
+        if (line.get("nature") or "") == "fee" or line["total"] <= ZERO:
+            continue
+        description = line.get("description") or ""
+        found = _BOOKING_RE.search(description.upper())
+        reference = found.group(1) if found else ""
+        sale = _find_sale(session, description, line["total"])
+        if sale is not None:
+            if sale.document_number and sale.document_number not in matched:
+                matched.append(sale.document_number)
+            continue
+        _record_missing_sale(
+            session,
+            email_name,
+            source_id,
+            period,
+            description,
+            line["total"],
+            reference,
+            document_id,
+        )
+    return matched
+
+
+def _tax_counterparty(kind, text, direction, name, nif):
+    # type: (str, str, str, str, Optional[str]) -> Tuple[str, Optional[str], str]
+    """Bank proofs and tax guides name the authority, not the company or the bank."""
+    blob = (text or "").lower()
+    if kind == "payment_proof":
+        if "segurança social" in blob or "seguranca social" in blob:
+            return "Segurança Social", None, "purchase"
+        if (
+            "autoridade tribut" in blob
+            or "estado (at" in blob
+            or "reten" in blob
+            or "pagamento por conta" in blob
+        ):
+            return "Autoridade Tributária", None, "purchase"
+    if kind == "tax_guide":
+        if "segurança social" in blob or "seguranca social" in blob:
+            return "Segurança Social", None, "purchase"
+        if "autoridade tribut" in blob or "pagamento por conta" in blob or "irs" in blob or "irc" in blob:
+            return "Autoridade Tributária", None, "purchase"
+    if kind == "payslip" and (is_company_nif(nif) or "nortavia" in (name or "").lower()):
+        return name, nif, direction
+    return name, nif, direction
+
+
+def ensure_owner_tasks(session):
+    # type: (Session) -> None
+    """missing_document and invoice_to_request are tasks for the owner."""
+    rows = session.exec(select(OpenItem)).all()
+    changed = False
+    for item in rows:
+        if item.kind in OWNER_TASK_KINDS and item.assignee != "owner":
+            item.assignee = "owner"
+            session.add(item)
+            changed = True
+    if changed:
+        session.commit()
+
+
 def process_attachment(
     session, message, attachment, eml_path, categories, reprocess=False
 ):
-    # type: (Session, MailMessage, Attachment, Path, list, bool) -> Dict[str, Any]
-    """Extract, classify, validate, and store one PDF. Raises on hard failure."""
+    # type: (Session, MailMessage, Attachment, Path, list, bool) -> List[Dict[str, Any]]
+    """Extract, classify, validate, and store one PDF. May store one row per line group."""
     path = Path(eml_path)
     filename = attachment.filename or "attachment.pdf"
     source_id = attachment_source_id(message, attachment, path)
     existing = _find_stored(session, source_id, _legacy_source_id(path, attachment))
     if existing is not None and not reprocess:
-        return _from_existing(existing, path.name, filename)
+        return [_from_existing(existing, path.name, filename)]
 
     text = pdf_text(attachment.data)
-    extracted = extract_pdf_document(
-        attachment.data, message, categories, text=text
-    )
+    extracted = extract_pdf_document(attachment.data, message, categories, text=text)
     kind = normalize_document_kind(
         extracted.get("document_kind") or extracted.get("document_type")
     )
+    kind = _correct_kind(kind, extracted, text)
     extracted["document_kind"] = kind
 
     if _is_bank_statement(kind, filename, text):
-        return _import_bank_pdf(
-            session, message, attachment, path, source_id, existing, text
-        )
+        return [
+            _import_bank_pdf(
+                session, message, attachment, path, source_id, existing, text
+            )
+        ]
 
-    category, cat_confidence, cat_justification, cat_source, raw_code = classify_category(
-        session, extracted, categories, text, message
+    issuer_nif = extracted.get("issuer_nif") or extracted.get("nif")
+    extracted["issuer_nif"] = issuer_nif
+    direction = resolve_direction(issuer_nif)
+    counterparty_name, counterparty_nif = resolve_counterparty(
+        direction,
+        extracted.get("issuer_name") or "",
+        issuer_nif,
+        extracted.get("recipient_name") or "",
+        extracted.get("recipient_nif"),
+        extracted.get("payee_name") or "",
+        extracted.get("payee_nif"),
     )
-    if category is not None:
-        extracted["suggested_category"] = category.code
-        extracted["conta_snc"] = category.snc_account
-    else:
-        extracted["suggested_category"] = raw_code or None
-        extracted["conta_snc"] = None
+    counterparty_name, counterparty_nif, direction = _tax_counterparty(
+        kind, text, direction, counterparty_name, counterparty_nif
+    )
+    extracted["counterparty_name"] = counterparty_name
+    extracted["counterparty_nif"] = counterparty_nif or ""
+    extracted["nif"] = counterparty_nif
+    extracted["direction"] = direction
 
-    extraction_confidence = float(extracted.get("confidence") or 0)
-    decision_confidence = min(extraction_confidence, float(cat_confidence))
-    justification = _one_line(cat_justification)
-    if extraction_confidence < float(cat_confidence):
-        justification = "Extraction confidence %.2f. %s" % (
-            extraction_confidence,
-            justification,
-        )
-    extracted["confidence"] = decision_confidence
-    extracted["justification"] = justification
-
-    validation = validate_extraction(extracted)
+    lines = _retag_meal_card(line_items(extracted), text)
     try:
-        base = parse_money_field(validation.get("base"))
-        total = parse_money_field(validation.get("total"))
-        vat_amount = parse_money_field(validation.get("vat"))
-        if kind in ("invoice", "receipt"):
-            vat_rate, _parsed_vat = primary_vat(extracted)
-        else:
-            vat_rate = ZERO
-    except (InvalidOperation, ValueError) as exc:
-        validation["ok"] = False
-        validation["status"] = "review"
-        validation["errors"].append("could not parse money amounts: %s" % exc)
-        base = ZERO
-        total = ZERO
-        vat_rate = ZERO
-        vat_amount = ZERO
+        lines = align_line_rounding(lines, total_payable_amount(extracted))
+    except (InvalidOperation, ValueError):
+        pass
+    extracted["lines"] = [
+        {
+            "description": line["description"],
+            "base": str(line["base"]),
+            "vat_rate": str(line["vat_rate"]),
+            "vat": str(line["vat"]),
+            "total": str(line["total"]),
+            "nature": line["nature"],
+        }
+        for line in lines
+    ]
+    validation = validate_extraction(extracted)
+    if not (direction == "purchase" and kind == "invoice"):
+        validation["foreign_note"] = None
 
     try:
         doc_date = parse_iso_date(validation.get("document_date") or extracted.get("date"))
@@ -611,12 +1036,8 @@ def process_attachment(
         due_date = None
 
     payment_iban = _payment_iban(extracted, text)
-    issuer_known, previous_ibans = _issuer_history(
-        session, extracted.get("nif"), source_id
-    )
-    flag_text = "\n".join(
-        [message.subject or "", message.body or "", text or ""]
-    )
+    issuer_known, previous_ibans = _issuer_history(session, issuer_nif, source_id)
+    flag_text = "\n".join([message.subject or "", message.body or "", text or ""])
     flags = resolve_risk_flags(
         extracted.get("risk_flags"),
         flag_text,
@@ -627,119 +1048,349 @@ def process_attachment(
         due_date,
         payment_iban,
     )
-    status, reason = _review_reason(
-        validation, decision_confidence, flags, category, raw_code
-    )
+    suspect = bool(flags)
 
     if doc_date is None and existing is not None and existing.document_date is not None:
         doc_date = existing.document_date
     if doc_date is None:
-        if "cannot store document without a date" not in reason:
-            extra = "validation failure: cannot store document without a date"
-            reason = (reason + "; " + extra).strip("; ")
-            if status == "validated":
-                status = "review"
-        return _item(
-            path.name,
-            filename,
-            status,
-            reason,
-            document_id=existing.id if existing is not None else None,
-            source_id=source_id,
-            reprocessed=False,
-            extra={
-                "extracted": extracted,
-                "validation": validation,
-                "document_kind": kind,
-            },
+        status, reason = _review_reason(validation, float(extracted.get("confidence") or 0), flags, None, "")
+        extra = "validation failure: cannot store document without a date"
+        reason = (reason + "; " + extra).strip("; ")
+        return [
+            _item(
+                path.name,
+                filename,
+                "review" if status == "validated" else status,
+                reason,
+                document_id=existing.id if existing is not None else None,
+                source_id=source_id,
+                extra={"document_kind": kind, "validation": validation},
+            )
+        ]
+
+    referenced = ""
+    settles = is_settlement(
+        kind,
+        bool(extracted.get("settles_invoice")),
+        str(extracted.get("referenced_invoice") or ""),
+        text,
+    )
+    if settles:
+        referenced = find_referenced_invoices(
+            extracted.get("referenced_invoice"),
+            "\n".join([text or "", message.subject or "", message.body or ""]),
+            str(extracted.get("document_number") or ""),
         )
 
+    credit = _is_credit_note(extracted, text)
+    if suspect or settles or not should_split_lines(lines):
+        base = parse_money_field(validation.get("base"))
+        vat_amount = parse_money_field(validation.get("vat"))
+        total = parse_money_field(validation.get("total"))
+        slices = [
+            {
+                "nature": "all",
+                "lines": lines,
+                "base": base,
+                "vat": vat_amount,
+                "total": total,
+                "source_id": source_id,
+            }
+        ]
+    else:
+        grouped = group_by_nature(lines)
+        slices = []
+        for index, (nature, group) in enumerate(grouped):
+            base, vat_amount, total = sum_lines(group)
+            sid = source_id if index == 0 else "%s:nature:%s" % (source_id, nature)
+            slices.append(
+                {
+                    "nature": nature,
+                    "lines": group,
+                    "base": base,
+                    "vat": vat_amount,
+                    "total": total,
+                    "source_id": sid,
+                }
+            )
+
+    saved = _save_attachment(attachment.data, filename)
     period_month = doc_date.strftime("%Y-%m")
     _get_or_create_period(session, period_month)
-    notes_parts = []  # type: List[str]
-    if reason:
-        notes_parts.append("reasons: " + reason.replace(" | ", " / "))
-    notes_parts.append("kind: " + kind)
-    notes_parts.append("classification: " + cat_source)
-    notes_parts.append("attachment: " + filename)
-    if payment_iban:
-        notes_parts.append("iban: " + payment_iban)
-    if validation.get("foreign_note"):
-        notes_parts.append(validation["foreign_note"])
-    if flags:
-        notes_parts.append("risk_flags: " + "; ".join(flags))
-    if kind == "payslip" and validation.get("deductions") is not None:
-        notes_parts.append("deductions: " + str(validation.get("deductions")))
+    ensure_special_categories(session)
+    suspect_category = _category_by_code(session, CATEGORY_SUSPECT)
+    settlement_category = _category_by_code(session, CATEGORY_SETTLEMENT)
+    extraction_confidence = float(extracted.get("confidence") or 0)
+    results = []
+    payout_document_id = None
 
-    fields = {
-        "source_id": source_id,
-        "period": period_month,
-        "document_date": doc_date,
-        "payment_date": None,
-        "tipo": guess_tipo(extracted.get("document_type"), kind),
-        "category_id": category.id if category is not None else None,
-        "entity": extracted.get("issuer_name") or "unknown",
-        "nif": _stored_nif(extracted.get("nif")),
-        "document_number": extracted.get("document_number") or filename,
-        "base": base,
-        "vat_rate": vat_rate,
-        "vat": vat_amount,
-        "total": total,
-        "deductible_vat": vat_amount if kind in ("invoice", "receipt") else ZERO,
-        "payment_method": None,
-        "status": status,
-        "notes": " | ".join(notes_parts),
-        "file_path": _rel_path(path),
-        "confidence": decision_confidence,
-        "justification": justification or "LLM extraction",
-    }
-    document, skipped = _apply_document(session, existing if reprocess else None, fields)
-    if skipped:
-        return _from_existing(document, path.name, filename)
-    return _item(
-        path.name,
-        filename,
-        status,
-        reason,
-        document_id=document.id,
-        source_id=source_id,
-        reprocessed=existing is not None and reprocess,
-        extra={
-            "extracted": extracted,
-            "validation": validation,
-            "document_kind": kind,
-            "classification": {
-                "source": cat_source,
-                "category": category.code if category is not None else None,
-                "raw_category": raw_code,
-                "conta_snc": category.snc_account if category is not None else None,
-                "confidence": decision_confidence,
-                "justification": justification,
-            },
-        },
-    )
+    for piece in slices:
+        piece_lines = piece["lines"]
+        focus = main_line(piece_lines)
+        line_text = ""
+        if focus is not None:
+            line_text = focus.get("description") or ""
+        if not line_text:
+            line_text = extracted.get("description") or ""
+        nature = piece["nature"]
+        if nature == "all" and focus is not None:
+            nature = focus.get("nature") or "supply"
+
+        sid = piece["source_id"]
+        current = existing if sid == source_id else _find_stored(session, sid, sid)
+        old = _snapshot(session, current) if current is not None else None
+
+        if suspect:
+            category = suspect_category
+            raw_code = CATEGORY_SUSPECT
+            cat_confidence = extraction_confidence
+            cat_justification = "Risk flags %s; no accounting entry, kept for review." % (
+                ", ".join(flags)
+            )
+            cat_source = "rule"
+            tipo = TIPO_SUSPECT
+        elif settles:
+            category = settlement_category
+            raw_code = CATEGORY_SETTLEMENT
+            account = settlement_account(session, kind, direction, counterparty_nif)
+            cat_confidence = 0.95
+            cat_justification = (
+                "Settles invoice %s; account %s; not booked again as revenue or expense."
+                % (referenced or "already issued", account)
+            )
+            cat_source = "rule"
+            tipo = resolve_tipo(direction, kind, CATEGORY_SETTLEMENT, True, False, False)
+        else:
+            account = ""
+            category, cat_confidence, cat_justification, cat_source, raw_code = _select_category(
+                session,
+                extracted,
+                text,
+                message,
+                kind,
+                direction,
+                counterparty_nif,
+                line_text,
+                nature,
+            )
+            if nature == "fee" and (
+                category is None or category.code.startswith("PESSOAL_")
+            ):
+                replacement = _category_by_code(session, "FSE_COMISSOES_PLATAFORMA")
+                if replacement is not None:
+                    category = replacement
+                    raw_code = replacement.code
+                    cat_justification = (
+                        "Loading commission booked apart from the meal-card top-up."
+                    )
+                    cat_source = "rule"
+                    cat_confidence = 0.85
+            if direction == "sale" and not _sale_category_ok(category, kind):
+                raw_code = category.code if category is not None else raw_code
+                cat_justification = (
+                    "Sale was classified as %s; a sale needs a REC_ category." % raw_code
+                )
+                category = None
+                cat_source = "rule"
+            tax_payment = is_tax_or_social(
+                kind, "\n".join([text or "", line_text]), counterparty_name
+            )
+            asset = bool(
+                category is not None and category.code.startswith("EQUIPAMENTO_")
+            ) or (direction == "purchase" and is_fixed_asset(line_text))
+            tipo = resolve_tipo(
+                direction,
+                kind,
+                category.code if category is not None else None,
+                False,
+                tax_payment,
+                asset,
+            )
+
+        if suspect:
+            account = ""
+        elif settles:
+            account = settlement_account(session, kind, direction, counterparty_nif)
+        else:
+            account = category.snc_account if category is not None and category.snc_account else ""
+
+        decision_confidence = min(extraction_confidence, float(cat_confidence))
+        justification = _one_line(cat_justification)
+        if extraction_confidence < float(cat_confidence):
+            justification = "Extraction confidence %.2f. %s" % (
+                extraction_confidence,
+                justification,
+            )
+
+        status, reason = _review_reason(
+            validation, decision_confidence, flags, category, raw_code
+        )
+        if settles and kind != "payout_report" and not referenced:
+            status = "review"
+            reason = (reason + "; referenced invoice number missing").strip("; ")
+
+        base = piece["base"]
+        vat_amount = piece["vat"]
+        total = piece["total"]
+        stored_lines = piece_lines
+        if credit and not settles:
+            base = _negate(base)
+            vat_amount = _negate(vat_amount)
+            total = _negate(total)
+            stored_lines = []
+            for line in piece_lines:
+                copied = dict(line)
+                copied["base"] = _negate(line["base"])
+                copied["vat"] = _negate(line["vat"])
+                copied["total"] = _negate(line["total"])
+                stored_lines.append(copied)
+            if "credit note stored negative" not in reason:
+                note = "credit note stored negative so it is not a second expense"
+                reason = (reason + "; " + note).strip("; ")
+
+        notes_parts = []  # type: List[str]
+        if reason:
+            notes_parts.append("reasons: " + reason.replace(" | ", " / "))
+        notes_parts.append("kind: " + kind)
+        notes_parts.append("direction: " + direction)
+        notes_parts.append("classification: " + cat_source)
+        notes_parts.append("attachment: " + filename)
+        issuer_label = party_label(extracted.get("issuer_name"), norm_nif(issuer_nif) or None)
+        if issuer_label:
+            notes_parts.append("issuer: " + issuer_label)
+        if payment_iban:
+            notes_parts.append("iban: " + payment_iban)
+        if validation.get("foreign_note"):
+            notes_parts.append(validation["foreign_note"])
+        if flags:
+            notes_parts.append("risk_flags: " + "; ".join(flags))
+        if suspect:
+            notes_parts.append("accounting_entry: no")
+            notes_parts.append("excluded_from_linking: yes")
+        if settles:
+            notes_parts.append("not_revenue: settles an invoice already issued")
+            if account:
+                notes_parts.append("snc_account: " + account)
+        if referenced:
+            notes_parts.append("referenced_invoice: " + referenced)
+        if kind == "payslip" and validation.get("deductions") is not None:
+            notes_parts.append("deductions: " + str(validation.get("deductions")))
+
+        fields = {
+            "source_id": sid,
+            "period": period_month,
+            "document_date": doc_date,
+            "payment_date": None,
+            "tipo": tipo,
+            "category_id": category.id if category is not None else None,
+            "entity": counterparty_name or "unknown",
+            "nif": _stored_nif(counterparty_nif),
+            "document_number": extracted.get("document_number") or filename,
+            "base": base,
+            "vat_rate": primary_rate(stored_lines) if stored_lines else ZERO,
+            "vat": vat_amount,
+            "total": total,
+            "deductible_vat": deductible_vat(tipo, direction, vat_amount),
+            "payment_method": None,
+            "status": status,
+            "notes": " | ".join(notes_parts),
+            "file_path": _rel_path(saved),
+            "original_filename": filename,
+            "direction": direction,
+            "referenced_invoice": referenced or None,
+            "lines_json": _lines_json(stored_lines) if stored_lines else None,
+            "confidence": decision_confidence,
+            "justification": justification or "LLM extraction",
+        }
+        if not fields["original_filename"]:
+            fields["original_filename"] = "attachment.pdf"
+        document, skipped = _apply_document(session, current, fields)
+        if suspect and document.id is not None:
+            links = session.exec(select(Link).where(Link.document_id == document.id)).all()
+            for link in links:
+                session.delete(link)
+            if links:
+                session.commit()
+        if skipped:
+            results.append(_from_existing(document, path.name, filename))
+            continue
+        new_code = category.code if category is not None else ""
+        changes = _changes(
+            document.id,
+            old,
+            new_code,
+            tipo,
+            party_label(fields["entity"], fields["nif"]),
+        )
+        if kind == "payout_report":
+            payout_document_id = document.id
+        results.append(
+            _item(
+                path.name,
+                filename,
+                status,
+                reason,
+                document_id=document.id,
+                source_id=sid,
+                reprocessed=current is not None,
+                extra={
+                    "created": current is None,
+                    "changes": changes,
+                    "validation": validation,
+                    "document_kind": kind,
+                    "direction": direction,
+                    "classification": {
+                        "source": cat_source,
+                        "category": new_code or None,
+                        "raw_category": raw_code,
+                        "conta_snc": account or None,
+                        "confidence": decision_confidence,
+                        "justification": justification,
+                    },
+                },
+            )
+        )
+
+    if kind == "payout_report" and lines:
+        matched = _missing_sales(
+            session,
+            path.name,
+            source_id,
+            period_month,
+            lines,
+            payout_document_id,
+        )
+        if matched and payout_document_id is not None:
+            payout = session.get(Document, payout_document_id)
+            if payout is not None:
+                payout.referenced_invoice = ", ".join(matched)
+                note = payout.notes or ""
+                extra = "referenced_invoice: " + payout.referenced_invoice
+                if extra not in note:
+                    payout.notes = (note + " | " + extra).strip(" |")
+                session.add(payout)
+                session.commit()
+
+    return results
 
 
 def process_eml(session, message, eml_path, categories, reprocess=False):
     # type: (Session, MailMessage, Path, list, bool) -> List[Dict[str, Any]]
     """Process every PDF in one message. One failure does not stop the others."""
+    ensure_special_categories(session)
     path = Path(eml_path)
     pdfs = _pdf_attachments(message)
     if not pdfs:
         item = process_email_without_pdf(session, message, path, reprocess=reprocess)
-        logger.info(
-            "%s %s %s",
-            item["status"],
-            path.name,
-            item.get("reason") or "",
-        )
+        logger.info("%s %s %s", item["status"], path.name, item.get("reason") or "")
+        ensure_owner_tasks(session)
         return [item]
 
     results = []
     for attachment in pdfs:
         filename = attachment.filename or "attachment.pdf"
         try:
-            item = process_attachment(
+            batch = process_attachment(
                 session,
                 message,
                 attachment,
@@ -751,15 +1402,17 @@ def process_eml(session, message, eml_path, categories, reprocess=False):
             session.rollback()
             reason = "%s: %s" % (type(exc).__name__, exc)
             logger.exception("failed %s %s", path.name, filename)
-            item = _item(path.name, filename, "error", reason)
-        logger.info(
-            "%s %s %s %s",
-            item["status"],
-            path.name,
-            filename,
-            item.get("reason") or "",
-        )
-        results.append(item)
+            batch = [_item(path.name, filename, "error", reason)]
+        for item in batch:
+            logger.info(
+                "%s %s %s %s",
+                item["status"],
+                path.name,
+                filename,
+                item.get("reason") or "",
+            )
+            results.append(item)
+    ensure_owner_tasks(session)
     return results
 
 

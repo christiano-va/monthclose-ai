@@ -41,6 +41,10 @@ class Document(SQLModel, table=True):
     status: str = Field(default="pendente", index=True)
     notes: Optional[str] = None
     file_path: Optional[str] = None
+    original_filename: Optional[str] = None
+    direction: Optional[str] = None  # sale | purchase
+    referenced_invoice: Optional[str] = None
+    lines_json: Optional[str] = None
     drive_link: Optional[str] = None
     confidence: float = 1.0
     justification: str = "manual"
@@ -88,12 +92,14 @@ class OpenItem(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     document_id: Optional[int] = Field(default=None, foreign_key="document.id")
     period: str = Field(index=True)
-    kind: str  # receivable | payable | invoice_to_request
+    kind: str  # receivable | payable | invoice_to_request | missing_document
     description: str
     amount: Decimal = Field(sa_column=Column(Numeric(14, 2), nullable=False))
     due_date: Optional[date] = None
     status: str = Field(default="open", index=True)
     notes: Optional[str] = None
+    assignee: Optional[str] = None  # owner | (unset for ledger items)
+    draft_email: Optional[str] = None
     confidence: float = 1.0
     justification: str = "open item from history or inbox"
 
@@ -117,6 +123,10 @@ class DocumentCreate(SQLModel):
     status: str = "pendente"
     notes: Optional[str] = None
     file_path: Optional[str] = None
+    original_filename: Optional[str] = None
+    direction: Optional[str] = None
+    referenced_invoice: Optional[str] = None
+    lines_json: Optional[str] = None
     drive_link: Optional[str] = None
     confidence: float = 1.0
     justification: str = "manual"

@@ -5,6 +5,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from app.money import ZERO, money_equal, to_money
+from app.settings import FINAL_CONSUMER_NIF
 
 ALLOWED_VAT_RATES = (
     Decimal("0"),
@@ -122,6 +123,19 @@ _PERSONAL_MARKERS = (
     "iban pessoal",
     "personal account",
     "private account",
+    "meios pessoais",
+)
+
+_SHORT_DEMAND_MARKERS = (
+    "pagamento urgente",
+    "pagar hoje",
+    "até amanhã",
+    "ate amanha",
+    "dentro de 24",
+    "nas próximas 24",
+    "nas proximas 24",
+    "imediatamente",
+    "de imediato",
 )
 
 _IBAN_RE = re.compile(r"\b([A-Z]{2}\d{2}(?:[ \t]?\d){11,34})\b")
@@ -163,6 +177,9 @@ def portuguese_nif_valid(nif):
     digits = "".join(ch for ch in str(nif) if ch.isdigit())
     if len(digits) != 9:
         return False
+    # 999999990 is the final-consumer NIF. It passes mod-11 and is accepted.
+    if digits == FINAL_CONSUMER_NIF:
+        return True
     weights = (9, 8, 7, 6, 5, 4, 3, 2)
     total = 0
     for index, weight in enumerate(weights):
@@ -268,9 +285,12 @@ def resolve_risk_flags(
     if any(marker in blob for marker in _URGENCY_MARKERS):
         flags.append("urgency_language")
 
+    demands_short = any(marker in blob for marker in _SHORT_DEMAND_MARKERS)
+    urgency = any(marker in blob for marker in _URGENCY_MARKERS)
     if document_kind == "invoice" and doc_date is not None and due_date is not None:
         delta = (due_date - doc_date).days
-        if 0 <= delta < SHORT_PAYMENT_DAYS:
+        # A due date a few days out, with no pressure wording, is a normal term.
+        if 0 <= delta < SHORT_PAYMENT_DAYS and (demands_short or urgency):
             flags.append("short_payment_deadline")
 
     personal_hit = any(marker in blob for marker in _PERSONAL_MARKERS) or (
@@ -296,6 +316,128 @@ def _vat_lines(extracted):
         vat = parse_money_field(item.get("vat"))
         lines.append((rate, base, vat))
     return lines
+
+
+def parse_vat_rate(value):
+    # type: (Any) -> Decimal
+    text = str(value or "").strip().lower()
+    if text in ("rc", "reverse charge", "isento", "isent", "m07"):
+        return Decimal("0")
+    return parse_money_field(value)
+
+
+def line_items(extracted):
+    # type: (Dict[str, Any]) -> List[Dict[str, Any]]
+    """Parsed lines. nature is supply, fee, topup, tax or other."""
+    parsed = []
+    for item in extracted.get("lines") or []:
+        if not isinstance(item, dict):
+            continue
+        nature = str(item.get("nature") or "supply").strip().lower()
+        if nature not in ("supply", "fee", "topup", "tax", "other"):
+            nature = "other"
+        base = parse_money_field(item.get("base"))
+        vat = parse_money_field(item.get("vat"))
+        total = parse_money_field(item.get("total"))
+        # A deduction is often extracted with a positive base and a negative total.
+        if vat == ZERO and total < ZERO and base > ZERO:
+            base = total
+        elif vat == ZERO and base < ZERO and total > ZERO and total == -base:
+            total = base
+        parsed.append(
+            {
+                "description": str(item.get("description") or "").strip(),
+                "base": base,
+                "vat_rate": parse_vat_rate(item.get("vat_rate")),
+                "vat": vat,
+                "total": total,
+                "nature": nature,
+            }
+        )
+    return parsed
+
+
+def align_line_rounding(lines, payable):
+    # type: (List[Dict[str, Any]], Decimal) -> List[Dict[str, Any]]
+    """Absorb a one-cent gap caused by rounding VAT on each line."""
+    if not lines:
+        return lines
+    total = ZERO
+    for line in lines:
+        total += line["total"]
+    diff = to_money(payable - total)
+    if diff == ZERO or abs(diff) > Decimal("0.01"):
+        return lines
+    target = lines[0]
+    for line in lines:
+        if abs(line["vat"]) > abs(target["vat"]):
+            target = line
+    target["vat"] = to_money(target["vat"] + diff)
+    target["total"] = to_money(target["base"] + target["vat"])
+    return lines
+
+
+def total_payable_amount(extracted):
+    # type: (Dict[str, Any]) -> Decimal
+    raw = extracted.get("total_payable")
+    if raw is None or str(raw).strip() == "":
+        raw = extracted.get("total")
+    if raw is None or str(raw).strip() == "":
+        raw = extracted.get("amount")
+    return parse_money_field(raw)
+
+
+def _check_lines(extracted, errors):
+    # type: (Dict[str, Any], List[str]) -> Optional[Tuple[Decimal, Decimal, Decimal, List[Dict[str, Any]]]]
+    """Validate VAT on each line and sum(lines) == total_payable.
+
+    Returns (base, vat, total_payable, lines) when lines are present.
+    """
+    lines = []
+    try:
+        lines = line_items(extracted)
+    except (InvalidOperation, ValueError):
+        errors.append("lines contain an invalid amount")
+        return None
+    if not lines:
+        return None
+
+    base_sum = ZERO
+    vat_sum = ZERO
+    total_sum = ZERO
+    for index, line in enumerate(lines, start=1):
+        label = line["description"] or ("line %d" % index)
+        rate = line["vat_rate"]
+        if rate not in ALLOWED_VAT_RATES:
+            errors.append("line %s VAT rate %s is not in {0, 6, 13, 23}" % (label, rate))
+        if not money_equal(line["base"] + line["vat"], line["total"]):
+            errors.append(
+                "line %s base %s + VAT %s != total %s"
+                % (label, line["base"], line["vat"], line["total"])
+            )
+        if rate == ZERO and line["vat"] != ZERO:
+            errors.append("line %s has VAT at rate 0" % label)
+        elif rate != ZERO:
+            expected = to_money(line["base"] * rate / Decimal("100"))
+            if abs(expected - line["vat"]) > Decimal("0.02"):
+                errors.append(
+                    "line %s VAT %s does not match rate %s on base %s"
+                    % (label, line["vat"], rate, line["base"])
+                )
+        base_sum += line["base"]
+        vat_sum += line["vat"]
+        total_sum += line["total"]
+
+    try:
+        payable = total_payable_amount(extracted)
+    except (InvalidOperation, ValueError):
+        errors.append("total_payable is not valid money")
+        payable = ZERO
+    if not money_equal(total_sum, payable):
+        errors.append(
+            "sum of lines %s != total_payable %s (tolerance 0.01)" % (to_money(total_sum), payable)
+        )
+    return to_money(base_sum), to_money(vat_sum), to_money(payable), lines
 
 
 def _optional_money(extracted, key):
@@ -361,10 +503,12 @@ def validate_extraction(extracted, today=None):
     # type: (Dict[str, Any], Optional[date]) -> Dict[str, Any]
     """Return {ok, status, errors} using Decimal arithmetic only.
 
-    invoice/receipt: base + VAT == total, and each VAT rate is 0, 6, 13 or 23.
-    payslip: gross - deductions == net, no VAT check.
-    tax_guide, payment_proof, payment_notice, payout_report, other: amount and date only.
-    Portuguese mod-11 runs only for a 9-digit Portuguese issuer NIF.
+    When lines are present, each line has VAT and sum(lines) must equal total_payable.
+    invoice/receipt without lines: base + VAT == total, rate in {0, 6, 13, 23}.
+    payslip: gross - deductions == net.
+    tax_guide, payment_proof, payment_notice, payout_report, other: amount and date,
+    plus the line check when lines are present.
+    Portuguese mod-11 runs only for a 9-digit Portuguese NIF. 999999990 is valid.
     """
     if today is None:
         today = date.today()
@@ -372,11 +516,20 @@ def validate_extraction(extracted, today=None):
     kind = normalize_document_kind(
         extracted.get("document_kind") or extracted.get("document_type")
     )
-    nif_kind, nif_norm = classify_nif(extracted.get("nif"))
+    issuer_raw = extracted.get("issuer_nif")
+    if issuer_raw in (None, ""):
+        issuer_raw = extracted.get("nif")
+    nif_kind, nif_norm = classify_nif(issuer_raw)
     foreign_note = FOREIGN_SUPPLIER_NOTE if nif_kind == "foreign" else None
 
     if nif_kind == "pt" and not portuguese_nif_valid(nif_norm):
         errors.append("issuer NIF failed Portuguese mod-11 checksum")
+
+    counterparty_raw = extracted.get("counterparty_nif")
+    if counterparty_raw not in (None, ""):
+        cp_kind, cp_norm = classify_nif(counterparty_raw)
+        if cp_kind == "pt" and not portuguese_nif_valid(cp_norm):
+            errors.append("counterparty NIF failed Portuguese mod-11 checksum")
 
     if kind == "bank_statement":
         doc_date = None
@@ -419,9 +572,18 @@ def validate_extraction(extracted, today=None):
                     )
         except (InvalidOperation, ValueError):
             errors.append("payslip amounts are not valid money")
+        checked = _check_lines(extracted, errors)
+        if checked is not None:
+            _base, _vat, payable, _lines = checked
+            if not money_equal(payable, net):
+                errors.append(
+                    "sum of lines %s != payslip net %s (tolerance 0.01)" % (payable, net)
+                )
         return _result(
             errors, gross, ZERO, net, doc_date, due, nif_norm or None, kind, foreign_note, deductions
         )
+
+    checked_lines = _check_lines(extracted, errors)
 
     if kind in AMOUNT_DATE_KINDS:
         amount = ZERO
@@ -432,7 +594,13 @@ def validate_extraction(extracted, today=None):
             if amount_value is None or amount_value == ZERO:
                 raw_amount = extracted.get("amount")
                 raw_total = extracted.get("total")
-                if raw_amount in (None, "") and raw_total in (None, ""):
+                raw_payable = extracted.get("total_payable")
+                if (
+                    raw_amount in (None, "")
+                    and raw_total in (None, "")
+                    and raw_payable in (None, "")
+                    and checked_lines is None
+                ):
                     errors.append("amount is missing")
                 elif amount_value is None:
                     errors.append("amount is not valid money")
@@ -442,9 +610,22 @@ def validate_extraction(extracted, today=None):
                 amount = amount_value
         except (InvalidOperation, ValueError):
             errors.append("amount is not valid money")
+        if checked_lines is not None:
+            base, vat_sum, payable, _lines = checked_lines
+            return _result(
+                errors, base, vat_sum, payable, doc_date, due, nif_norm or None, kind, foreign_note, None
+            )
         return _result(
             errors, amount, ZERO, amount, doc_date, due, nif_norm or None, kind, foreign_note, None
         )
+
+    if checked_lines is not None:
+        base, vat_sum, payable, _lines = checked_lines
+        return _result(
+            errors, base, vat_sum, payable, doc_date, due, nif_norm or None, kind, foreign_note, None
+        )
+
+    errors.append("lines are missing")
 
     try:
         base = parse_money_field(extracted.get("base"))

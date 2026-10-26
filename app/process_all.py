@@ -16,7 +16,7 @@ from app.db import ROOT, engine, init_db
 from app.extract import list_categories
 from app.llm import llm_call_count, reset_llm_calls
 from app.mailbox import LocalEmlMailbox
-from app.process_one import LOW_CONFIDENCE_THRESHOLD, process_eml
+from app.process_one import LOW_CONFIDENCE_THRESHOLD, ensure_owner_tasks, process_eml
 
 logger = logging.getLogger("app.process")
 
@@ -69,6 +69,7 @@ def process_all(folder=None, reprocess=False):
                     session, message, path, categories, reprocess=reprocess
                 )
             )
+        ensure_owner_tasks(session)
     return results
 
 
@@ -132,6 +133,41 @@ def format_summary(results):
         )
     if not found:
         lines.append("(none)")
+    lines.append("")
+    lines.append("changed documents (category / tipo / counterparty)")
+    lines.append("id | field | old | new")
+    changed = False
+    seen = set()
+    for item in results:
+        for change in item.get("changes") or []:
+            key = (
+                change.get("id"),
+                change.get("field"),
+                change.get("old"),
+                change.get("new"),
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            changed = True
+            lines.append(
+                "%s | %s | %s | %s"
+                % (
+                    change.get("id"),
+                    change.get("field") or "",
+                    change.get("old") or "",
+                    change.get("new") or "",
+                )
+            )
+    if not changed:
+        lines.append("(none)")
+    new_ids = []
+    for item in results:
+        if item.get("created") and item.get("document_id"):
+            new_ids.append(str(item["document_id"]))
+    if new_ids:
+        lines.append("")
+        lines.append("new documents: %s" % ", ".join(new_ids))
     return "\n".join(lines)
 
 
