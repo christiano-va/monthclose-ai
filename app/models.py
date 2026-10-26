@@ -88,7 +88,7 @@ class OpenItem(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     document_id: Optional[int] = Field(default=None, foreign_key="document.id")
     period: str = Field(index=True)
-    kind: str  # receivable | payable
+    kind: str  # receivable | payable | invoice_to_request
     description: str
     amount: Decimal = Field(sa_column=Column(Numeric(14, 2), nullable=False))
     due_date: Optional[date] = None

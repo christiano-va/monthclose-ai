@@ -20,7 +20,7 @@ from app.models import (
     Period,
 )
 from app.money import money_equal, to_money
-from app.statements import parse_bank_statement_csv
+from app.statements import import_statement_text
 
 MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
 
@@ -194,48 +194,7 @@ def import_bank_statement(
         except UnicodeDecodeError:
             text = raw.decode("latin-1")
 
-    meta, rows = parse_bank_statement_csv(text)
-    created = 0
-    skipped = 0
-    periods = set()
-
-    for row in rows:
-        get_or_create_period(session, row["period"])
-        periods.add(row["period"])
-        existing = session.exec(
-            select(BankLine).where(
-                BankLine.movement_date == row["movement_date"],
-                BankLine.description == row["description"],
-                BankLine.amount == row["amount"],
-            )
-        ).first()
-        if existing is not None:
-            skipped += 1
-            continue
-        line = BankLine(
-            period=row["period"],
-            account_iban=row["account_iban"],
-            movement_date=row["movement_date"],
-            value_date=row["value_date"],
-            description=row["description"],
-            debit=row["debit"],
-            credit=row["credit"],
-            amount=row["amount"],
-            balance=row["balance"],
-            status="unsupported",
-            confidence=1.0,
-            justification="imported from bank statement CSV",
-        )
-        session.add(line)
-        created += 1
-
-    session.commit()
-    return {
-        "meta": meta,
-        "created": created,
-        "skipped": skipped,
-        "periods": sorted(periods),
-    }
+    return import_statement_text(session, text)
 
 
 @app.get("/bank-lines", response_model=List[BankLine])

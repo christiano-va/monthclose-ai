@@ -1,7 +1,8 @@
 """Code checks on extracted documents. The LLM proposes; this module decides."""
+import re
 from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from app.money import ZERO, money_equal, to_money
 
@@ -12,6 +13,119 @@ ALLOWED_VAT_RATES = (
     Decimal("23"),
 )
 
+# Fixed risk-flag names. Anything else the model returns is ignored.
+# A sender-domain mismatch is not a flag: the mailbox receives mail
+# forwarded by the accountant and by the owner.
+RISK_FLAGS = (
+    "iban_changed",
+    "iban_new",
+    "urgency_language",
+    "short_payment_deadline",
+    "personal_account",
+)
+
+DOCUMENT_KINDS = (
+    "invoice",
+    "receipt",
+    "payslip",
+    "tax_guide",
+    "payment_proof",
+    "payment_notice",
+    "bank_statement",
+    "payout_report",
+    "other",
+)
+
+VAT_CHECK_KINDS = ("invoice", "receipt")
+PAYSLIP_KIND = "payslip"
+AMOUNT_DATE_KINDS = (
+    "tax_guide",
+    "payment_proof",
+    "payment_notice",
+    "payout_report",
+    "other",
+)
+
+# Fewer than this many days between the document date and the due date
+# is an unusually short payment deadline. A normal 6-10 day term is not.
+SHORT_PAYMENT_DAYS = 5
+
+FOREIGN_SUPPLIER_NOTE = "foreign supplier - reverse charge, review"
+
+_KIND_ALIASES = {
+    "invoice": "invoice",
+    "fatura": "invoice",
+    "factura": "invoice",
+    "fatura-recibo": "invoice",
+    "fatura_recibo": "invoice",
+    "nota_credito": "invoice",
+    "nota_de_credito": "invoice",
+    "credit_note": "invoice",
+    "nota_debito": "invoice",
+    "debit_note": "invoice",
+    "receipt": "receipt",
+    "recibo": "receipt",
+    "payslip": "payslip",
+    "recibo_vencimento": "payslip",
+    "vencimento": "payslip",
+    "tax_guide": "tax_guide",
+    "guia": "tax_guide",
+    "payment_proof": "payment_proof",
+    "comprovativo": "payment_proof",
+    "payment_notice": "payment_notice",
+    "aviso": "payment_notice",
+    "aviso_pagamento": "payment_notice",
+    "bank_statement": "bank_statement",
+    "extrato": "bank_statement",
+    "payout_report": "payout_report",
+    "other": "other",
+}
+
+_URGENCY_MARKERS = (
+    "urgente",
+    "urgent",
+    "suspens",
+    "imediatamente",
+    "last chance",
+    "última oportunidade",
+    "ultima oportunidade",
+    "de imediato",
+)
+
+_IBAN_CHANGE_MARKERS = (
+    "iban foi alter",
+    "iban alterad",
+    "alterámos o nosso iban",
+    "alteramos o nosso iban",
+    "alterámos o iban",
+    "alteramos o iban",
+    "novo iban",
+    "new iban",
+    "iban atualiz",
+    "iban actualiz",
+    "mudança de iban",
+    "mudanca de iban",
+    "mudança do iban",
+    "mudanca do iban",
+    "dados bancários alter",
+    "dados bancarios alter",
+    "bank details changed",
+    "bank details have changed",
+    "updated our iban",
+    "iban was changed",
+    "iban has changed",
+)
+
+_PERSONAL_MARKERS = (
+    "conta pessoal",
+    "conta particular",
+    "iban pessoal",
+    "personal account",
+    "private account",
+)
+
+_IBAN_RE = re.compile(r"\b([A-Z]{2}\d{2}(?:[ \t]?\d){11,34})\b")
+
 
 def parse_money_field(value):
     # type: (Any) -> Decimal
@@ -19,7 +133,9 @@ def parse_money_field(value):
         return ZERO
     if isinstance(value, (int, float, Decimal)):
         return to_money(value)
-    text = str(value).strip()
+    text = str(value).strip().replace("%", "").replace(" ", "")
+    if not text:
+        return ZERO
     if "," in text and "." in text:
         if text.rfind(",") > text.rfind("."):
             text = text.replace(".", "").replace(",", ".")
@@ -56,6 +172,120 @@ def portuguese_nif_valid(nif):
     return check == int(digits[8])
 
 
+def classify_nif(nif):
+    # type: (Optional[str]) -> Tuple[str, str]
+    """Return (pt|foreign|absent, normalized id). Zeros are not an issuer NIF."""
+    if nif is None:
+        return "absent", ""
+    raw = str(nif).strip().upper()
+    if raw in ("", "-", "N/A", "NA", "NONE", "NULL"):
+        return "absent", ""
+    alnum = "".join(ch for ch in raw if ch.isalnum())
+    if not alnum or set(alnum) <= set("0"):
+        return "absent", ""
+    if alnum.startswith("PT") and len(alnum) == 11 and alnum[2:].isdigit():
+        return "pt", alnum[2:]
+    if len(alnum) == 9 and alnum.isdigit():
+        return "pt", alnum
+    return "foreign", alnum
+
+
+def normalize_document_kind(value):
+    # type: (Optional[str]) -> str
+    text = str(value or "").strip().lower().replace(" ", "_").replace("-", "_")
+    if text in DOCUMENT_KINDS:
+        return text
+    if text in _KIND_ALIASES:
+        return _KIND_ALIASES[text]
+    return "other"
+
+
+def normalize_iban(value):
+    # type: (Optional[str]) -> str
+    if not value:
+        return ""
+    compact = "".join(ch for ch in str(value).upper() if ch.isalnum())
+    if len(compact) < 15 or not compact[:2].isalpha() or not compact[2:4].isdigit():
+        return ""
+    return compact
+
+
+def find_ibans(text):
+    # type: (Optional[str]) -> List[str]
+    if not text:
+        return []
+    found = []  # type: List[str]
+    for match in _IBAN_RE.finditer(str(text).upper()):
+        iban = normalize_iban(match.group(1))
+        if iban and iban not in found:
+            found.append(iban)
+    return found
+
+
+def resolve_risk_flags(
+    proposed,
+    text,
+    previous_ibans,
+    issuer_known,
+    document_kind,
+    doc_date,
+    due_date,
+    payment_iban,
+):
+    # type: (Any, str, Sequence[str], bool, str, Optional[date], Optional[date], Optional[str]) -> List[str]
+    """Keep only the fixed flags, and only when the text or prior IBANs support them.
+
+    A normal payment IBAN on a known supplier is not a flag. Sender domain is never a flag.
+    """
+    # `proposed` is the model list. Names outside RISK_FLAGS, including a
+    # sender-domain mismatch, are never copied. Flags below come from the
+    # text and from IBANs already stored for this issuer.
+    if proposed is None:
+        proposed = []
+
+    blob = (text or "").lower()
+    flags = []  # type: List[str]
+
+    current = normalize_iban(payment_iban)
+    previous = []  # type: List[str]
+    for item in previous_ibans or []:
+        iban = normalize_iban(item)
+        if iban and iban not in previous:
+            previous.append(iban)
+
+    announces_change = any(marker in blob for marker in _IBAN_CHANGE_MARKERS)
+    same_as_previous = bool(current and previous and current in previous)
+    # Payslips, receipts and bank proofs print the worker's or the company's
+    # own account. Only an invoice or a reimbursement note can show a new
+    # supplier account.
+    iban_relevant = document_kind in ("invoice", "other")
+    if iban_relevant and issuer_known and not same_as_previous:
+        if current and previous and current not in previous:
+            flags.append("iban_changed")
+        elif announces_change:
+            flags.append("iban_changed" if previous else "iban_new")
+
+    if any(marker in blob for marker in _URGENCY_MARKERS):
+        flags.append("urgency_language")
+
+    if document_kind == "invoice" and doc_date is not None and due_date is not None:
+        delta = (due_date - doc_date).days
+        if 0 <= delta < SHORT_PAYMENT_DAYS:
+            flags.append("short_payment_deadline")
+
+    personal_hit = any(marker in blob for marker in _PERSONAL_MARKERS) or (
+        "reembolso" in blob and "iban" in blob
+    )
+    if personal_hit:
+        flags.append("personal_account")
+
+    ordered = []  # type: List[str]
+    for name in RISK_FLAGS:
+        if name in flags:
+            ordered.append(name)
+    return ordered
+
+
 def _vat_lines(extracted):
     # type: (Dict[str, Any]) -> List[Tuple[Decimal, Decimal, Decimal]]
     lines = []
@@ -68,55 +298,16 @@ def _vat_lines(extracted):
     return lines
 
 
-def validate_extraction(extracted, today=None):
-    # type: (Dict[str, Any], Optional[date]) -> Dict[str, Any]
-    """Return {ok, status, errors} using Decimal arithmetic only."""
-    if today is None:
-        today = date.today()
-    errors = []  # type: List[str]
+def _optional_money(extracted, key):
+    # type: (Dict[str, Any], str) -> Optional[Decimal]
+    value = extracted.get(key)
+    if value is None or str(value).strip() == "":
+        return None
+    return parse_money_field(value)
 
-    try:
-        base = parse_money_field(extracted.get("base"))
-        total = parse_money_field(extracted.get("total"))
-    except (InvalidOperation, ValueError):
-        errors.append("base/total are not valid money amounts")
-        base = ZERO
-        total = ZERO
 
-    vat_lines = []
-    try:
-        vat_lines = _vat_lines(extracted)
-    except (InvalidOperation, ValueError):
-        errors.append("vat_per_rate contains an invalid amount")
-
-    vat_sum = ZERO
-    base_sum = ZERO
-    for rate, line_base, line_vat in vat_lines:
-        base_sum += line_base
-        vat_sum += line_vat
-        if rate not in ALLOWED_VAT_RATES:
-            errors.append(
-                "VAT rate %s is not in {0, 6, 13, 23}" % rate
-            )
-
-    if not vat_lines:
-        errors.append("vat_per_rate is empty")
-
-    if vat_lines and not money_equal(base_sum, base):
-        errors.append(
-            "sum of VAT bases %s != document base %s" % (base_sum, base)
-        )
-
-    if not money_equal(base + vat_sum, total):
-        errors.append(
-            "base %s + VAT %s != total %s (tolerance 0.01)"
-            % (base, vat_sum, total)
-        )
-
-    nif = extracted.get("nif")
-    if not portuguese_nif_valid(nif):
-        errors.append("issuer NIF failed Portuguese mod-11 checksum")
-
+def _check_date(extracted, errors, today):
+    # type: (Dict[str, Any], List[str], date) -> Optional[date]
     doc_date = None
     try:
         doc_date = parse_iso_date(extracted.get("date"))
@@ -129,27 +320,169 @@ def validate_extraction(extracted, today=None):
         latest = today + timedelta(days=90)
         if doc_date < earliest or doc_date > latest:
             errors.append("document date %s is outside the sanity window" % doc_date)
+    return doc_date
 
+
+def _check_due_date(extracted, doc_date, errors):
+    # type: (Dict[str, Any], Optional[date], List[str]) -> Optional[date]
     due = None
     raw_due = extracted.get("due_date")
-    if raw_due:
-        try:
-            due = parse_iso_date(raw_due)
-        except (TypeError, ValueError):
-            errors.append("due date is not YYYY-MM-DD")
-        if due is not None and doc_date is not None:
-            if due > doc_date + timedelta(days=730):
-                errors.append("due date is more than two years after the document date")
+    if not raw_due:
+        return None
+    try:
+        due = parse_iso_date(raw_due)
+    except (TypeError, ValueError):
+        errors.append("due date is not YYYY-MM-DD")
+        return None
+    if due is not None and doc_date is not None and due > doc_date + timedelta(days=730):
+        errors.append("due date is more than two years after the document date")
+    return due
 
-    status = "review" if errors else "validated"
+
+def _result(errors, base, vat_sum, total, doc_date, due, nif, kind, foreign_note, deductions):
+    # type: (List[str], Decimal, Decimal, Decimal, Optional[date], Optional[date], Optional[str], str, Optional[str], Optional[Decimal]) -> Dict[str, Any]
     return {
         "ok": len(errors) == 0,
-        "status": status,
+        "status": "review" if errors else "validated",
         "errors": errors,
         "base": str(base),
         "vat": str(vat_sum),
         "total": str(total),
+        "deductions": str(deductions) if deductions is not None else None,
         "document_date": doc_date.isoformat() if doc_date else None,
         "due_date": due.isoformat() if due else None,
         "nif": nif,
+        "document_kind": kind,
+        "foreign_note": foreign_note,
     }
+
+
+def validate_extraction(extracted, today=None):
+    # type: (Dict[str, Any], Optional[date]) -> Dict[str, Any]
+    """Return {ok, status, errors} using Decimal arithmetic only.
+
+    invoice/receipt: base + VAT == total, and each VAT rate is 0, 6, 13 or 23.
+    payslip: gross - deductions == net, no VAT check.
+    tax_guide, payment_proof, payment_notice, payout_report, other: amount and date only.
+    Portuguese mod-11 runs only for a 9-digit Portuguese issuer NIF.
+    """
+    if today is None:
+        today = date.today()
+    errors = []  # type: List[str]
+    kind = normalize_document_kind(
+        extracted.get("document_kind") or extracted.get("document_type")
+    )
+    nif_kind, nif_norm = classify_nif(extracted.get("nif"))
+    foreign_note = FOREIGN_SUPPLIER_NOTE if nif_kind == "foreign" else None
+
+    if nif_kind == "pt" and not portuguese_nif_valid(nif_norm):
+        errors.append("issuer NIF failed Portuguese mod-11 checksum")
+
+    if kind == "bank_statement":
+        doc_date = None
+        try:
+            doc_date = parse_iso_date(extracted.get("date"))
+        except (TypeError, ValueError):
+            doc_date = None
+        return _result(errors, ZERO, ZERO, ZERO, doc_date, None, nif_norm or None, kind, foreign_note, None)
+
+    doc_date = _check_date(extracted, errors, today)
+    due = None
+    if kind in VAT_CHECK_KINDS:
+        due = _check_due_date(extracted, doc_date, errors)
+
+    if kind == PAYSLIP_KIND:
+        gross = ZERO
+        deductions = ZERO
+        net = ZERO
+        try:
+            gross_value = _optional_money(extracted, "gross")
+            deductions_value = _optional_money(extracted, "deductions")
+            net_value = _optional_money(extracted, "net")
+            if net_value is None:
+                net_value = _optional_money(extracted, "amount")
+            if net_value is None:
+                net_value = _optional_money(extracted, "total")
+            if gross_value is None or deductions_value is None or net_value is None:
+                errors.append("payslip requires gross, deductions and net")
+                gross = gross_value or ZERO
+                deductions = deductions_value or ZERO
+                net = net_value or ZERO
+            else:
+                gross = gross_value
+                deductions = deductions_value
+                net = net_value
+                if not money_equal(gross - deductions, net):
+                    errors.append(
+                        "gross %s - deductions %s != net %s (tolerance 0.01)"
+                        % (gross, deductions, net)
+                    )
+        except (InvalidOperation, ValueError):
+            errors.append("payslip amounts are not valid money")
+        return _result(
+            errors, gross, ZERO, net, doc_date, due, nif_norm or None, kind, foreign_note, deductions
+        )
+
+    if kind in AMOUNT_DATE_KINDS:
+        amount = ZERO
+        try:
+            amount_value = _optional_money(extracted, "amount")
+            if amount_value is None:
+                amount_value = _optional_money(extracted, "total")
+            if amount_value is None or amount_value == ZERO:
+                raw_amount = extracted.get("amount")
+                raw_total = extracted.get("total")
+                if raw_amount in (None, "") and raw_total in (None, ""):
+                    errors.append("amount is missing")
+                elif amount_value is None:
+                    errors.append("amount is not valid money")
+                else:
+                    amount = amount_value
+            else:
+                amount = amount_value
+        except (InvalidOperation, ValueError):
+            errors.append("amount is not valid money")
+        return _result(
+            errors, amount, ZERO, amount, doc_date, due, nif_norm or None, kind, foreign_note, None
+        )
+
+    try:
+        base = parse_money_field(extracted.get("base"))
+        total = parse_money_field(extracted.get("total"))
+    except (InvalidOperation, ValueError):
+        errors.append("base/total are not valid money amounts")
+        base = ZERO
+        total = ZERO
+
+    vat_lines = []  # type: List[Tuple[Decimal, Decimal, Decimal]]
+    try:
+        vat_lines = _vat_lines(extracted)
+    except (InvalidOperation, ValueError):
+        errors.append("vat_per_rate contains an invalid amount")
+
+    vat_sum = ZERO
+    base_sum = ZERO
+    for rate, line_base, line_vat in vat_lines:
+        base_sum += line_base
+        vat_sum += line_vat
+        if rate not in ALLOWED_VAT_RATES:
+            errors.append("VAT rate %s is not in {0, 6, 13, 23}" % rate)
+
+    if not vat_lines:
+        if money_equal(base, total) and base != ZERO:
+            vat_sum = ZERO
+        else:
+            errors.append("vat_per_rate is empty")
+
+    if vat_lines and not money_equal(base_sum, base):
+        errors.append("sum of VAT bases %s != document base %s" % (base_sum, base))
+
+    if not (not vat_lines and "vat_per_rate is empty" in errors):
+        if not money_equal(base + vat_sum, total):
+            errors.append(
+                "base %s + VAT %s != total %s (tolerance 0.01)" % (base, vat_sum, total)
+            )
+
+    return _result(
+        errors, base, vat_sum, total, doc_date, due, nif_norm or None, kind, foreign_note, None
+    )

@@ -15,12 +15,26 @@ class LLMError(RuntimeError):
     pass
 
 
+_LLM_CALLS = 0
+
+
+def reset_llm_calls():
+    # type: () -> None
+    global _LLM_CALLS
+    _LLM_CALLS = 0
+
+
+def llm_call_count():
+    # type: () -> int
+    return _LLM_CALLS
+
+
 def _client():
     # type: () -> OpenAI
     key = os.getenv("XAI_API_KEY")
     if not key:
         raise LLMError("XAI_API_KEY is not set")
-    return OpenAI(api_key=key, base_url=XAI_BASE_URL)
+    return OpenAI(api_key=key, base_url=XAI_BASE_URL, timeout=120.0)
 
 
 def _model_name():
@@ -129,6 +143,8 @@ def llm_json(prompt, schema):
         ],
         "temperature": 0,
     }
+    global _LLM_CALLS
+    _LLM_CALLS += 1
     try:
         response = client.chat.completions.create(
             response_format={
@@ -142,6 +158,7 @@ def llm_json(prompt, schema):
             **kwargs
         )
     except Exception:
+        _LLM_CALLS += 1
         response = client.chat.completions.create(
             response_format={"type": "json_object"},
             **kwargs

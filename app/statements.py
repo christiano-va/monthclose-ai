@@ -1,6 +1,9 @@
 from datetime import datetime
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
+from sqlmodel import Session, select
+
+from app.models import BankLine, Period
 from app.money import ZERO, parse_pt_money, to_money
 
 
@@ -81,3 +84,56 @@ def parse_bank_statement_csv(text):
         )
 
     return meta, rows
+
+
+def import_statement_text(session, text, justification=None):
+    # type: (Session, str, Optional[str]) -> Dict[str, Any]
+    """Insert bank lines from statement CSV text. Existing lines are skipped."""
+    if justification is None:
+        justification = "imported from bank statement CSV"
+    meta, rows = parse_bank_statement_csv(text)
+    created = 0
+    skipped = 0
+    periods = set()
+
+    for row in rows:
+        month = row["period"]
+        period = session.exec(select(Period).where(Period.month == month)).first()
+        if period is None:
+            session.add(Period(month=month, status="open"))
+            session.commit()
+        periods.add(month)
+        existing = session.exec(
+            select(BankLine).where(
+                BankLine.movement_date == row["movement_date"],
+                BankLine.description == row["description"],
+                BankLine.amount == row["amount"],
+            )
+        ).first()
+        if existing is not None:
+            skipped += 1
+            continue
+        line = BankLine(
+            period=row["period"],
+            account_iban=row["account_iban"],
+            movement_date=row["movement_date"],
+            value_date=row["value_date"],
+            description=row["description"],
+            debit=row["debit"],
+            credit=row["credit"],
+            amount=row["amount"],
+            balance=row["balance"],
+            status="unsupported",
+            confidence=1.0,
+            justification=justification,
+        )
+        session.add(line)
+        created += 1
+
+    session.commit()
+    return {
+        "meta": meta,
+        "created": created,
+        "skipped": skipped,
+        "periods": sorted(periods),
+    }

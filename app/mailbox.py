@@ -24,6 +24,7 @@ class MailMessage:
     body: str
     attachments: List[Attachment] = field(default_factory=list)
     source_path: Optional[str] = None
+    message_id: Optional[str] = None
 
 
 class Mailbox(ABC):
@@ -39,6 +40,7 @@ def _parse_eml(path):
     msg = BytesParser(policy=policy.default).parsebytes(raw)
     sender = str(msg.get("from") or "")
     subject = str(msg.get("subject") or "")
+    message_id = str(msg.get("message-id") or "").strip() or None
     date_header = msg.get("date")
     parsed_date = None
     if date_header:
@@ -82,6 +84,7 @@ def _parse_eml(path):
         body="\n".join(body_parts).strip(),
         attachments=attachments,
         source_path=str(path),
+        message_id=message_id,
     )
 
 
