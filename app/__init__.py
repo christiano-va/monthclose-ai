@@ -1,0 +1,1 @@
+"""MonthClose AI application package."""

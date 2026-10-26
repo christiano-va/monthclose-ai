@@ -1,0 +1,364 @@
+id,data_documento,data_pagamento,tipo,categoria,conta_snc,entidade,nif,documento,base,taxa_iva,iva,total,iva_dedutivel,meio_pagamento,estado,notas
+H0001,2025-07-01,2025-07-01,gasto,FSE_RENDA,6261,Helena Marques Duarte,192984160,Recibo renda 2025-07,1300.0,0,0.0,1300.0,0.0,transferencia,pago,retenção 25% IRS = 325.00; pago líquido 975.00
+H0002,2025-07-01,2025-07-08,gasto,FSE_HONORARIOS,6224,"Contas Certas - Contabilidade, Lda",519672739,FT CC2025/07,140.0,23,32.2,172.2,32.2,transferencia,pago,
+H0003,2025-07-01,2025-07-02,receita,REC_AL,7212,Hóspede (consumidor final),999999990,FR 2025B/0031,569.81,6,34.19,604.0,0.0,payout_plataforma,recebido,
+H0004,2025-07-03,2025-07-15,gasto,FSE_COMUNICACAO,6262,"Ondanet Comunicações, S.A.",501778489,FT ON2025/07,36.58,23,8.41,44.99,8.41,debito_direto,pago,
+H0005,2025-07-03,2025-07-03,gasto,FSE_COMBUSTIVEL,6242,"Petrovia Combustíveis, S.A.",506804577,FS PV2025070,48.27,23,11.1,59.37,5.55,cartao_empresa,pago,gasóleo: IVA dedutível 50%
+H0006,2025-07-05,2025-07-28,gasto,FSE_DESLOCACOES,6251,"AutoPass Portagens, S.A.",501362703,FT AP2025/07,12.6,23,2.9,15.5,0.0,conta_pessoal_socio,pago,portagens; reembolsado ao sócio
+H0007,2025-07-06,2025-07-07,receita,REC_AL,7212,Hóspede (consumidor final),999999990,FR 2025B/0032,683.02,6,40.98,724.0,0.0,payout_plataforma,recebido,
+H0008,2025-07-08,2025-07-21,gasto,FSE_ELETRICIDADE_AL,6241,"LuzViva Energia, S.A.",506488764,FT LV2025/07,31.85,6,1.91,33.76,1.91,debito_direto,pago,
+H0009,2025-07-08,2025-07-21,gasto,FSE_ELETRICIDADE_AL,6241,"LuzViva Energia, S.A.",506488764,FT LV2025/07,33.83,23,7.78,41.61,7.78,debito_direto,pago,
+H0010,2025-07-08,2025-07-28,gasto,MATERIAS_3D,6231,"MercaNova Portugal, Unipessoal Lda",516714759,FT MN2025/07,35.9,23,8.26,44.16,8.26,cartao_pessoal_socio,pago,pago pelo sócio - reembolsado
+H0011,2025-07-10,2025-07-10,gasto,OUTROS_DONATIVOS,6882,Igreja Comunidade Esperança - Associação,501079815,D-2025-07,400.0,0,0.0,400.0,0.0,transferencia,pago,
+H0012,2025-07-11,2025-07-12,receita,REC_AL,7212,Hóspede (consumidor final),999999990,FR 2025B/0033,683.02,6,40.98,724.0,0.0,payout_plataforma,recebido,
+H0013,2025-07-13,2025-07-14,receita,REC_AL,7212,Hóspede (consumidor final),999999990,FR 2025B/0034,341.51,6,20.49,362.0,0.0,payout_plataforma,recebido,
+H0014,2025-07-14,2025-07-14,gasto,FSE_COMBUSTIVEL,6242,"Petrovia Combustíveis, S.A.",506804577,FS PV2025071,36.14,23,8.31,44.45,4.16,cartao_empresa,pago,gasóleo: IVA dedutível 50%
+H0015,2025-07-15,2025-07-20,estado,ESTADO_IRC_PPC,2411/241,Autoridade Tributária,-,1.º PPC 2025,380.0,0,0.0,380.0,0.0,pagamento_estado,pago,
+H0016,2025-07-17,2025-07-18,receita,REC_AL,7212,Hóspede (consumidor final),999999990,FR 2025B/0035,732.08,6,43.92,776.0,0.0,payout_plataforma,recebido,
+H0017,2025-07-21,2025-07-06,receita,REC_3D,7213,Consumidor final,999999990,FR 2025B/0037,24.39,23,5.61,30.0,0.0,mbway,recebido,
+H0018,2025-07-23,2025-07-24,receita,REC_AL,7212,Hóspede (consumidor final),999999990,FR 2025B/0036,341.51,6,20.49,362.0,0.0,payout_plataforma,recebido,
+H0019,2025-07-23,2025-07-23,receita,REC_3D,7213,"Ateliê Moldura Viva, Lda",519320816,FR 2025B/0038,32.52,23,7.48,40.0,0.0,transferencia,recebido,
+H0020,2025-07-31,2025-07-02,gasto,FSE_COMISSOES_PLATAFORMA,6228,StayNest Ireland Ltd,IE9876543ZW,SN-PT-2025-07,18.12,0,0.0,18.12,0.0,deduzido_no_payout,pago,autoliquidação IVA 23% (liquidado = dedutível)
+H0021,2025-07-31,2025-07-07,gasto,FSE_COMISSOES_PLATAFORMA,6228,StayNest Ireland Ltd,IE9876543ZW,SN-PT-2025-07,21.72,0,0.0,21.72,0.0,deduzido_no_payout,pago,autoliquidação IVA 23% (liquidado = dedutível)
+H0022,2025-07-31,2025-07-12,gasto,FSE_COMISSOES_PLATAFORMA,6228,StayNest Ireland Ltd,IE9876543ZW,SN-PT-2025-07,21.72,0,0.0,21.72,0.0,deduzido_no_payout,pago,autoliquidação IVA 23% (liquidado = dedutível)
+H0023,2025-07-31,2025-07-14,gasto,FSE_COMISSOES_PLATAFORMA,6228,StayNest Ireland Ltd,IE9876543ZW,SN-PT-2025-07,10.86,0,0.0,10.86,0.0,deduzido_no_payout,pago,autoliquidação IVA 23% (liquidado = dedutível)
+H0024,2025-07-31,2025-07-18,gasto,FSE_COMISSOES_PLATAFORMA,6228,StayNest Ireland Ltd,IE9876543ZW,SN-PT-2025-07,23.28,0,0.0,23.28,0.0,deduzido_no_payout,pago,autoliquidação IVA 23% (liquidado = dedutível)
+H0025,2025-07-31,2025-07-24,gasto,FSE_COMISSOES_PLATAFORMA,6228,StayNest Ireland Ltd,IE9876543ZW,SN-PT-2025-07,10.86,0,0.0,10.86,0.0,deduzido_no_payout,pago,autoliquidação IVA 23% (liquidado = dedutível)
+H0026,2025-07-31,2025-07-31,gasto,FSE_SERVICOS_BANCARIOS,6981/6812,"Banco Exemplo, S.A.",501141707,Extrato 2025-07,7.8,0,0.0,7.8,0.0,debito_conta,pago,
+H0027,2025-07-31,2025-07-31,pessoal,PESSOAL_REMUNERACOES,632x,Ricardo Alves,-,RV 2025-07 Ricardo Alves,1282.0,0,0.0,1282.0,0.0,transferencia,pago,"bruto 1150.00; sub.ref 132,00; SS trab 126.50; IRS 180.55"
+H0028,2025-07-31,,pessoal,PESSOAL_ENCARGOS,635,Segurança Social,-,TSU entidade 2025-07 Ricardo Alves,273.12,0,0.0,273.12,0.0,guia_mes_seguinte,pago,
+H0029,2025-07-31,2025-08-07,receita,REC_CONSULTORIA,7211,"Quadrante Sistemas, Lda",506978800,FT 2025A/0015,4980.8,23,1145.58,6126.38,0.0,transferencia,recebido,
+H0030,2025-08-01,2025-08-01,gasto,FSE_RENDA,6261,Helena Marques Duarte,192984160,Recibo renda 2025-08,1300.0,0,0.0,1300.0,0.0,transferencia,pago,retenção 25% IRS = 325.00; pago líquido 975.00
+H0031,2025-08-01,2025-08-08,gasto,FSE_HONORARIOS,6224,"Contas Certas - Contabilidade, Lda",519672739,FT CC2025/08,140.0,23,32.2,172.2,32.2,transferencia,pago,
+H0032,2025-08-03,2025-08-15,gasto,FSE_COMUNICACAO,6262,"Ondanet Comunicações, S.A.",501778489,FT ON2025/08,36.58,23,8.41,44.99,8.41,debito_direto,pago,
+H0033,2025-08-03,2025-08-04,receita,REC_AL,7212,Hóspede (consumidor final),999999990,FR 2025B/0039,650.94,6,39.06,690.0,0.0,payout_plataforma,recebido,
+H0034,2025-08-05,2025-08-28,gasto,FSE_DESLOCACOES,6251,"AutoPass Portagens, S.A.",501362703,FT AP2025/08,19.45,23,4.47,23.92,0.0,conta_pessoal_socio,pago,portagens; reembolsado ao sócio
+H0035,2025-08-06,2025-08-28,gasto,MATERIAS_3D,6231,"MercaNova Portugal, Unipessoal Lda",516714759,FT MN2025/08,49.57,23,11.4,60.97,11.4,cartao_pessoal_socio,pago,pago pelo sócio - reembolsado
+H0036,2025-08-07,2025-08-08,receita,REC_AL,7212,Hóspede (consumidor final),999999990,FR 2025B/0040,341.51,6,20.49,362.0,0.0,payout_plataforma,recebido,
+H0037,2025-08-08,2025-08-21,gasto,FSE_ELETRICIDADE_AL,6241,"LuzViva Energia, S.A.",506488764,FT LV2025/08,31.85,6,1.91,33.76,1.91,debito_direto,pago,
+H0038,2025-08-08,2025-08-21,gasto,FSE_ELETRICIDADE_AL,6241,"LuzViva Energia, S.A.",506488764,FT LV2025/08,36.73,23,8.45,45.18,8.45,debito_direto,pago,
+H0039,2025-08-10,2025-08-10,gasto,OUTROS_DONATIVOS,6882,Igreja Comunidade Esperança - Associação,501079815,D-2025-08,400.0,0,0.0,400.0,0.0,transferencia,pago,
+H0040,2025-08-10,2025-08-11,receita,REC_AL,7212,Hóspede (consumidor final),999999990,FR 2025B/0041,749.06,6,44.94,794.0,0.0,payout_plataforma,recebido,
+H0041,2025-08-10,2025-08-28,receita,REC_3D,7213,"Ateliê Moldura Viva, Lda",519320816,FR 2025B/0047,40.65,23,9.35,50.0,0.0,transferencia,recebido,
+H0042,2025-08-15,2025-08-18,estado,ESTADO_IVA,2436,Autoridade Tributária,-,IVA 2.º trimestre,1180.4,0,0.0,1180.4,0.0,pagamento_estado,pago,
+H0043,2025-08-15,2025-08-16,receita,REC_AL,7212,Hóspede (consumidor final),999999990,FR 2025B/0042,325.47,6,19.53,345.0,0.0,payout_plataforma,recebido,
+H0044,2025-08-17,2025-08-18,receita,REC_AL,7212,Hóspede (consumidor final),999999990,FR 2025B/0043,325.47,6,19.53,345.0,0.0,payout_plataforma,recebido,
+H0045,2025-08-17,2025-08-14,receita,REC_3D,7213,Consumidor final,999999990,FR 2025B/0046,81.3,23,18.7,100.0,0.0,mbway,recebido,
+H0046,2025-08-22,2025-08-23,receita,REC_AL,7212,Hóspede (consumidor final),999999990,FR 2025B/0044,749.06,6,44.94,794.0,0.0,payout_plataforma,recebido,
+H0047,2025-08-24,2025-08-24,gasto,FSE_COMBUSTIVEL,6242,"Petrovia Combustíveis, S.A.",506804577,FS PV2025080,52.94,23,12.18,65.12,6.09,cartao_empresa,pago,gasóleo: IVA dedutível 50%
+H0048,2025-08-26,2025-08-27,receita,REC_AL,7212,Hóspede (consumidor final),999999990,FR 2025B/0045,879.25,6,52.76,932.01,0.0,payout_plataforma,recebido,
+H0049,2025-08-31,2025-08-04,gasto,FSE_COMISSOES_PLATAFORMA,6228,StayNest Ireland Ltd,IE9876543ZW,SN-PT-2025-08,20.7,0,0.0,20.7,0.0,deduzido_no_payout,pago,autoliquidação IVA 23% (liquidado = dedutível)
+H0050,2025-08-31,2025-08-08,gasto,FSE_COMISSOES_PLATAFORMA,6228,StayNest Ireland Ltd,IE9876543ZW,SN-PT-2025-08,10.86,0,0.0,10.86,0.0,deduzido_no_payout,pago,autoliquidação IVA 23% (liquidado = dedutível)
+H0051,2025-08-31,2025-08-11,gasto,FSE_COMISSOES_PLATAFORMA,6228,StayNest Ireland Ltd,IE9876543ZW,SN-PT-2025-08,23.82,0,0.0,23.82,0.0,deduzido_no_payout,pago,autoliquidação IVA 23% (liquidado = dedutível)
+H0052,2025-08-31,2025-08-16,gasto,FSE_COMISSOES_PLATAFORMA,6228,StayNest Ireland Ltd,IE9876543ZW,SN-PT-2025-08,10.35,0,0.0,10.35,0.0,deduzido_no_payout,pago,autoliquidação IVA 23% (liquidado = dedutível)
+H0053,2025-08-31,2025-08-18,gasto,FSE_COMISSOES_PLATAFORMA,6228,StayNest Ireland Ltd,IE9876543ZW,SN-PT-2025-08,10.35,0,0.0,10.35,0.0,deduzido_no_payout,pago,autoliquidação IVA 23% (liquidado = dedutível)
+H0054,2025-08-31,2025-08-23,gasto,FSE_COMISSOES_PLATAFORMA,6228,StayNest Ireland Ltd,IE9876543ZW,SN-PT-2025-08,23.82,0,0.0,23.82,0.0,deduzido_no_payout,pago,autoliquidação IVA 23% (liquidado = dedutível)
+H0055,2025-08-31,2025-08-27,gasto,FSE_COMISSOES_PLATAFORMA,6228,StayNest Ireland Ltd,IE9876543ZW,SN-PT-2025-08,27.96,0,0.0,27.96,0.0,deduzido_no_payout,pago,autoliquidação IVA 23% (liquidado = dedutível)
+H0056,2025-08-31,2025-08-31,gasto,FSE_SERVICOS_BANCARIOS,6981/6812,"Banco Exemplo, S.A.",501141707,Extrato 2025-08,7.8,0,0.0,7.8,0.0,debito_conta,pago,
+H0057,2025-08-31,2025-08-31,pessoal,PESSOAL_REMUNERACOES,632x,Ricardo Alves,-,RV 2025-08 Ricardo Alves,1282.0,0,0.0,1282.0,0.0,transferencia,pago,"bruto 1150.00; sub.ref 132,00; SS trab 126.50; IRS 180.55"
+H0058,2025-08-31,,pessoal,PESSOAL_ENCARGOS,635,Segurança Social,-,TSU entidade 2025-08 Ricardo Alves,273.12,0,0.0,273.12,0.0,guia_mes_seguinte,pago,
+H0059,2025-08-31,2025-09-21,receita,REC_CONSULTORIA,7211,"Quadrante Sistemas, Lda",506978800,FT 2025A/0016,4528.0,23,1041.44,5569.44,0.0,transferencia,recebido,
+H0060,2025-09-01,2025-09-01,gasto,FSE_RENDA,6261,Helena Marques Duarte,192984160,Recibo renda 2025-09,1300.0,0,0.0,1300.0,0.0,transferencia,pago,retenção 25% IRS = 325.00; pago líquido 975.00
+H0061,2025-09-01,2025-09-08,gasto,FSE_HONORARIOS,6224,"Contas Certas - Contabilidade, Lda",519672739,FT CC2025/09,140.0,23,32.2,172.2,32.2,transferencia,pago,
+H0062,2025-09-01,2025-09-02,receita,REC_AL,7212,Hóspede (consumidor final),999999990,FR 2025B/0048,566.04,6,33.96,600.0,0.0,payout_plataforma,recebido,
+H0063,2025-09-03,2025-09-15,gasto,FSE_COMUNICACAO,6262,"Ondanet Comunicações, S.A.",501778489,FT ON2025/09,36.58,23,8.41,44.99,8.41,debito_direto,pago,
+H0064,2025-09-05,2025-09-28,gasto,FSE_DESLOCACOES,6251,"AutoPass Portagens, S.A.",501362703,FT AP2025/09,18.94,23,4.36,23.3,0.0,conta_pessoal_socio,pago,portagens; reembolsado ao sócio
+H0065,2025-09-08,2025-09-21,gasto,FSE_ELETRICIDADE_AL,6241,"LuzViva Energia, S.A.",506488764,FT LV2025/09,31.85,6,1.91,33.76,1.91,debito_direto,pago,
+H0066,2025-09-08,2025-09-21,gasto,FSE_ELETRICIDADE_AL,6241,"LuzViva Energia, S.A.",506488764,FT LV2025/09,28.03,23,6.45,34.48,6.45,debito_direto,pago,
+H0067,2025-09-09,2025-09-10,receita,REC_AL,7212,Hóspede (consumidor final),999999990,FR 2025B/0049,283.02,6,16.98,300.0,0.0,payout_plataforma,recebido,
+H0068,2025-09-10,2025-09-10,gasto,OUTROS_DONATIVOS,6882,Igreja Comunidade Esperança - Associação,501079815,D-2025-09,400.0,0,0.0,400.0,0.0,transferencia,pago,
+H0069,2025-09-10,2025-09-25,gasto,FSE_SEGUROS,6263,"Segurança Plena - Companhia de Seguros, S.A.",501784721,FT SP2025,205.9,0,0.0,205.9,0.0,debito_direto,pago,
+H0070,2025-09-12,2025-09-12,gasto,FSE_COMBUSTIVEL,6242,"Petrovia Combustíveis, S.A.",506804577,FS PV2025091,42.82,23,9.85,52.67,4.93,cartao_empresa,pago,gasóleo: IVA dedutível 50%
+H0071,2025-09-15,2025-09-20,estado,ESTADO_IRC_PPC,2411/241,Autoridade Tributária,-,2.º PPC 2025,380.0,0,0.0,380.0,0.0,pagamento_estado,pago,
+H0072,2025-09-15,2025-09-16,receita,REC_AL,7212,Hóspede (consumidor final),999999990,FR 2025B/0050,353.77,6,21.23,375.0,0.0,payout_plataforma,recebido,
+H0073,2025-09-20,2025-09-20,gasto,FSE_COMBUSTIVEL,6242,"Petrovia Combustíveis, S.A.",506804577,FS PV2025090,53.15,23,12.22,65.37,6.11,cartao_empresa,pago,gasóleo: IVA dedutível 50%
+H0074,2025-09-22,2025-09-23,receita,REC_AL,7212,Hóspede (consumidor final),999999990,FR 2025B/0051,636.79,6,38.21,675.0,0.0,payout_plataforma,recebido,
+H0075,2025-09-30,2025-09-02,gasto,FSE_COMISSOES_PLATAFORMA,6228,StayNest Ireland Ltd,IE9876543ZW,SN-PT-2025-09,18.0,0,0.0,18.0,0.0,deduzido_no_payout,pago,autoliquidação IVA 23% (liquidado = dedutível)
+H0076,2025-09-30,2025-09-10,gasto,FSE_COMISSOES_PLATAFORMA,6228,StayNest Ireland Ltd,IE9876543ZW,SN-PT-2025-09,9.0,0,0.0,9.0,0.0,deduzido_no_payout,pago,autoliquidação IVA 23% (liquidado = dedutível)
+H0077,2025-09-30,2025-09-16,gasto,FSE_COMISSOES_PLATAFORMA,6228,StayNest Ireland Ltd,IE9876543ZW,SN-PT-2025-09,11.25,0,0.0,11.25,0.0,deduzido_no_payout,pago,autoliquidação IVA 23% (liquidado = dedutível)
+H0078,2025-09-30,2025-09-23,gasto,FSE_COMISSOES_PLATAFORMA,6228,StayNest Ireland Ltd,IE9876543ZW,SN-PT-2025-09,20.25,0,0.0,20.25,0.0,deduzido_no_payout,pago,autoliquidação IVA 23% (liquidado = dedutível)
+H0079,2025-09-30,2025-09-30,gasto,FSE_SERVICOS_BANCARIOS,6981/6812,"Banco Exemplo, S.A.",501141707,Extrato 2025-09,7.8,0,0.0,7.8,0.0,debito_conta,pago,
+H0080,2025-09-30,2025-09-30,pessoal,PESSOAL_REMUNERACOES,632x,Ricardo Alves,-,RV 2025-09 Ricardo Alves,1282.0,0,0.0,1282.0,0.0,transferencia,pago,"bruto 1150.00; sub.ref 132,00; SS trab 126.50; IRS 180.55"
+H0081,2025-09-30,,pessoal,PESSOAL_ENCARGOS,635,Segurança Social,-,TSU entidade 2025-09 Ricardo Alves,273.12,0,0.0,273.12,0.0,guia_mes_seguinte,pago,
+H0082,2025-09-30,2025-10-17,receita,REC_CONSULTORIA,7211,"Quadrante Sistemas, Lda",506978800,FT 2025A/0017,4980.8,23,1145.58,6126.38,0.0,transferencia,recebido,
+H0083,2025-10-01,2025-10-01,gasto,FSE_RENDA,6261,Helena Marques Duarte,192984160,Recibo renda 2025-10,1300.0,0,0.0,1300.0,0.0,transferencia,pago,retenção 25% IRS = 325.00; pago líquido 975.00
+H0084,2025-10-01,2025-10-08,gasto,FSE_HONORARIOS,6224,"Contas Certas - Contabilidade, Lda",519672739,FT CC2025/10,140.0,23,32.2,172.2,32.2,transferencia,pago,
+H0085,2025-10-02,2025-10-03,receita,REC_AL,7212,Hóspede (consumidor final),999999990,FR 2025B/0052,235.85,6,14.15,250.0,0.0,payout_plataforma,recebido,
+H0086,2025-10-03,2025-10-15,gasto,FSE_COMUNICACAO,6262,"Ondanet Comunicações, S.A.",501778489,FT ON2025/10,36.58,23,8.41,44.99,8.41,debito_direto,pago,
+H0087,2025-10-05,2025-10-28,gasto,FSE_DESLOCACOES,6251,"AutoPass Portagens, S.A.",501362703,FT AP2025/10,13.93,23,3.2,17.13,0.0,conta_pessoal_socio,pago,portagens; reembolsado ao sócio
+H0088,2025-10-07,2025-10-28,gasto,MATERIAS_3D,6231,"MercaNova Portugal, Unipessoal Lda",516714759,FT MN2025/10,45.7,23,10.51,56.21,10.51,cartao_pessoal_socio,pago,pago pelo sócio - reembolsado
+H0089,2025-10-08,2025-10-21,gasto,FSE_ELETRICIDADE_AL,6241,"LuzViva Energia, S.A.",506488764,FT LV2025/10,31.85,6,1.91,33.76,1.91,debito_direto,pago,
+H0090,2025-10-08,2025-10-21,gasto,FSE_ELETRICIDADE_AL,6241,"LuzViva Energia, S.A.",506488764,FT LV2025/10,22.23,23,5.11,27.34,5.11,debito_direto,pago,
+H0091,2025-10-10,2025-10-10,gasto,OUTROS_DONATIVOS,6882,Igreja Comunidade Esperança - Associação,501079815,D-2025-10,400.0,0,0.0,400.0,0.0,transferencia,pago,
+H0092,2025-10-12,2025-10-13,receita,REC_AL,7212,Hóspede (consumidor final),999999990,FR 2025B/0053,198.11,6,11.89,210.0,0.0,payout_plataforma,recebido,
+H0093,2025-10-13,2025-10-13,gasto,FSE_COMBUSTIVEL,6242,"Petrovia Combustíveis, S.A.",506804577,FS PV2025100,38.87,23,8.94,47.81,4.47,cartao_empresa,pago,gasóleo: IVA dedutível 50%
+H0094,2025-10-14,2025-10-03,receita,REC_3D,7213,"Ateliê Moldura Viva, Lda",519320816,FR 2025B/0056,121.95,23,28.05,150.0,0.0,transferencia,recebido,
+H0095,2025-10-21,2025-10-22,receita,REC_AL,7212,Hóspede (consumidor final),999999990,FR 2025B/0054,566.04,6,33.96,600.0,0.0,payout_plataforma,recebido,
+H0096,2025-10-25,2025-10-15,receita,REC_3D,7213,Consumidor final,999999990,FR 2025B/0055,40.65,23,9.35,50.0,0.0,mbway,recebido,
+H0097,2025-10-31,2025-10-03,gasto,FSE_COMISSOES_PLATAFORMA,6228,StayNest Ireland Ltd,IE9876543ZW,SN-PT-2025-10,7.5,0,0.0,7.5,0.0,deduzido_no_payout,pago,autoliquidação IVA 23% (liquidado = dedutível)
+H0098,2025-10-31,2025-10-13,gasto,FSE_COMISSOES_PLATAFORMA,6228,StayNest Ireland Ltd,IE9876543ZW,SN-PT-2025-10,6.3,0,0.0,6.3,0.0,deduzido_no_payout,pago,autoliquidação IVA 23% (liquidado = dedutível)
+H0099,2025-10-31,2025-10-22,gasto,FSE_COMISSOES_PLATAFORMA,6228,StayNest Ireland Ltd,IE9876543ZW,SN-PT-2025-10,18.0,0,0.0,18.0,0.0,deduzido_no_payout,pago,autoliquidação IVA 23% (liquidado = dedutível)
+H0100,2025-10-31,2025-10-31,gasto,FSE_SERVICOS_BANCARIOS,6981/6812,"Banco Exemplo, S.A.",501141707,Extrato 2025-10,7.8,0,0.0,7.8,0.0,debito_conta,pago,
+H0101,2025-10-31,2025-10-31,pessoal,PESSOAL_REMUNERACOES,632x,Ricardo Alves,-,RV 2025-10 Ricardo Alves,1282.0,0,0.0,1282.0,0.0,transferencia,pago,"bruto 1150.00; sub.ref 132,00; SS trab 126.50; IRS 180.55"
+H0102,2025-10-31,,pessoal,PESSOAL_ENCARGOS,635,Segurança Social,-,TSU entidade 2025-10 Ricardo Alves,273.12,0,0.0,273.12,0.0,guia_mes_seguinte,pago,
+H0103,2025-10-31,2025-11-05,receita,REC_CONSULTORIA,7211,"Quadrante Sistemas, Lda",506978800,FT 2025A/0018,5207.2,23,1197.66,6404.86,0.0,transferencia,recebido,
+H0104,2025-11-01,2025-11-01,gasto,FSE_RENDA,6261,Helena Marques Duarte,192984160,Recibo renda 2025-11,1300.0,0,0.0,1300.0,0.0,transferencia,pago,retenção 25% IRS = 325.00; pago líquido 975.00
+H0105,2025-11-01,2025-11-08,gasto,FSE_HONORARIOS,6224,"Contas Certas - Contabilidade, Lda",519672739,FT CC2025/11,140.0,23,32.2,172.2,32.2,transferencia,pago,
+H0106,2025-11-02,2025-11-03,receita,REC_AL,7212,Hóspede (consumidor final),999999990,FR 2025B/0057,382.08,6,22.92,405.0,0.0,payout_plataforma,recebido,
+H0107,2025-11-03,2025-11-15,gasto,FSE_COMUNICACAO,6262,"Ondanet Comunicações, S.A.",501778489,FT ON2025/11,36.58,23,8.41,44.99,8.41,debito_direto,pago,
+H0108,2025-11-05,2025-11-28,gasto,FSE_DESLOCACOES,6251,"AutoPass Portagens, S.A.",501362703,FT AP2025/11,25.92,23,5.96,31.88,0.0,conta_pessoal_socio,pago,portagens; reembolsado ao sócio
+H0109,2025-11-08,2025-11-21,gasto,FSE_ELETRICIDADE_AL,6241,"LuzViva Energia, S.A.",506488764,FT LV2025/11,31.85,6,1.91,33.76,1.91,debito_direto,pago,
+H0110,2025-11-08,2025-11-21,gasto,FSE_ELETRICIDADE_AL,6241,"LuzViva Energia, S.A.",506488764,FT LV2025/11,17.88,23,4.11,21.99,4.11,debito_direto,pago,
+H0111,2025-11-10,2025-11-10,gasto,OUTROS_DONATIVOS,6882,Igreja Comunidade Esperança - Associação,501079815,D-2025-11,400.0,0,0.0,400.0,0.0,transferencia,pago,
+H0112,2025-11-14,2025-11-14,investimento,EQUIPAMENTO_ADMIN,4352,"Loja Informática Exemplo, Lda",512157111,FT LIE2025/3321,1219.51,23,280.49,1500.0,280.49,transferencia,pago,Portátil de desenvolvimento - ativo fixo
+H0113,2025-11-15,2025-11-18,estado,ESTADO_IVA,2436,Autoridade Tributária,-,IVA 3.º trimestre,3729.68,0,0.0,3729.68,0.0,pagamento_estado,pago,
+H0114,2025-11-15,2025-11-16,receita,REC_AL,7212,Hóspede (consumidor final),999999990,FR 2025B/0058,495.28,6,29.72,525.0,0.0,payout_plataforma,recebido,
+H0115,2025-11-16,2025-11-20,receita,REC_3D,7213,"Ateliê Moldura Viva, Lda",519320816,FR 2025B/0060,32.52,23,7.48,40.0,0.0,transferencia,recebido,
+H0116,2025-11-20,2025-11-11,receita,REC_3D,7213,Consumidor final,999999990,FR 2025B/0059,56.91,23,13.09,70.0,0.0,mbway,recebido,
+H0117,2025-11-24,2025-11-24,gasto,FSE_COMBUSTIVEL,6242,"Petrovia Combustíveis, S.A.",506804577,FS PV2025110,44.55,23,10.25,54.8,5.13,cartao_empresa,pago,gasóleo: IVA dedutível 50%
+H0118,2025-11-30,2025-11-03,gasto,FSE_COMISSOES_PLATAFORMA,6228,StayNest Ireland Ltd,IE9876543ZW,SN-PT-2025-11,12.15,0,0.0,12.15,0.0,deduzido_no_payout,pago,autoliquidação IVA 23% (liquidado = dedutível)
+H0119,2025-11-30,2025-11-16,gasto,FSE_COMISSOES_PLATAFORMA,6228,StayNest Ireland Ltd,IE9876543ZW,SN-PT-2025-11,15.75,0,0.0,15.75,0.0,deduzido_no_payout,pago,autoliquidação IVA 23% (liquidado = dedutível)
+H0120,2025-11-30,2025-11-30,gasto,FSE_SERVICOS_BANCARIOS,6981/6812,"Banco Exemplo, S.A.",501141707,Extrato 2025-11,7.8,0,0.0,7.8,0.0,debito_conta,pago,
+H0121,2025-11-30,2025-11-30,pessoal,PESSOAL_REMUNERACOES,632x,Ricardo Alves,-,RV 2025-11 Ricardo Alves,1282.0,0,0.0,1282.0,0.0,transferencia,pago,"bruto 1150.00; sub.ref 132,00; SS trab 126.50; IRS 180.55"
+H0122,2025-11-30,,pessoal,PESSOAL_ENCARGOS,635,Segurança Social,-,TSU entidade 2025-11 Ricardo Alves,273.12,0,0.0,273.12,0.0,guia_mes_seguinte,pago,
+H0123,2025-11-30,2025-12-07,receita,REC_CONSULTORIA,7211,"Quadrante Sistemas, Lda",506978800,FT 2025A/0019,4980.8,23,1145.58,6126.38,0.0,transferencia,recebido,
+H0124,2025-12-01,2025-12-01,gasto,FSE_RENDA,6261,Helena Marques Duarte,192984160,Recibo renda 2025-12,1300.0,0,0.0,1300.0,0.0,transferencia,pago,retenção 25% IRS = 325.00; pago líquido 975.00
+H0125,2025-12-01,2025-12-08,gasto,FSE_HONORARIOS,6224,"Contas Certas - Contabilidade, Lda",519672739,FT CC2025/12,140.0,23,32.2,172.2,32.2,transferencia,pago,
+H0126,2025-12-01,2025-12-02,receita,REC_AL,7212,Hóspede (consumidor final),999999990,FR 2025B/0061,216.98,6,13.02,230.0,0.0,payout_plataforma,recebido,
+H0127,2025-12-03,2025-12-15,gasto,FSE_COMUNICACAO,6262,"Ondanet Comunicações, S.A.",501778489,FT ON2025/12,36.58,23,8.41,44.99,8.41,debito_direto,pago,
+H0128,2025-12-03,2025-12-07,receita,REC_3D,7213,Consumidor final,999999990,FR 2025B/0064,40.65,23,9.35,50.0,0.0,mbway,recebido,
+H0129,2025-12-05,2025-12-28,gasto,FSE_DESLOCACOES,6251,"AutoPass Portagens, S.A.",501362703,FT AP2025/12,22.43,23,5.16,27.59,0.0,conta_pessoal_socio,pago,portagens; reembolsado ao sócio
+H0130,2025-12-08,2025-12-21,gasto,FSE_ELETRICIDADE_AL,6241,"LuzViva Energia, S.A.",506488764,FT LV2025/12,31.85,6,1.91,33.76,1.91,debito_direto,pago,
+H0131,2025-12-08,2025-12-21,gasto,FSE_ELETRICIDADE_AL,6241,"LuzViva Energia, S.A.",506488764,FT LV2025/12,20.78,23,4.78,25.56,4.78,debito_direto,pago,
+H0132,2025-12-10,2025-12-10,gasto,OUTROS_DONATIVOS,6882,Igreja Comunidade Esperança - Associação,501079815,D-2025-12,400.0,0,0.0,400.0,0.0,transferencia,pago,
+H0133,2025-12-10,2025-12-11,receita,REC_AL,7212,Hóspede (consumidor final),999999990,FR 2025B/0062,325.47,6,19.53,345.0,0.0,payout_plataforma,recebido,
+H0134,2025-12-14,2025-12-28,gasto,MATERIAS_3D,6231,"MercaNova Portugal, Unipessoal Lda",516714759,FT MN2025/12,67.75,23,15.58,83.33,15.58,cartao_pessoal_socio,pago,pago pelo sócio - reembolsado
+H0135,2025-12-15,2025-12-20,estado,ESTADO_IRC_PPC,2411/241,Autoridade Tributária,-,3.º PPC 2025,380.0,0,0.0,380.0,0.0,pagamento_estado,pago,
+H0136,2025-12-19,2025-12-19,gasto,FSE_COMBUSTIVEL,6242,"Petrovia Combustíveis, S.A.",506804577,FS PV2025120,43.49,23,10.0,53.49,5.0,cartao_empresa,pago,gasóleo: IVA dedutível 50%
+H0137,2025-12-19,2025-12-20,receita,REC_AL,7212,Hóspede (consumidor final),999999990,FR 2025B/0063,707.55,6,42.45,750.0,0.0,payout_plataforma,recebido,
+H0138,2025-12-31,2025-12-02,gasto,FSE_COMISSOES_PLATAFORMA,6228,StayNest Ireland Ltd,IE9876543ZW,SN-PT-2025-12,6.9,0,0.0,6.9,0.0,deduzido_no_payout,pago,autoliquidação IVA 23% (liquidado = dedutível)
+H0139,2025-12-31,2025-12-11,gasto,FSE_COMISSOES_PLATAFORMA,6228,StayNest Ireland Ltd,IE9876543ZW,SN-PT-2025-12,10.35,0,0.0,10.35,0.0,deduzido_no_payout,pago,autoliquidação IVA 23% (liquidado = dedutível)
+H0140,2025-12-31,2025-12-20,gasto,FSE_COMISSOES_PLATAFORMA,6228,StayNest Ireland Ltd,IE9876543ZW,SN-PT-2025-12,22.5,0,0.0,22.5,0.0,deduzido_no_payout,pago,autoliquidação IVA 23% (liquidado = dedutível)
+H0141,2025-12-31,2025-12-31,gasto,FSE_SERVICOS_BANCARIOS,6981/6812,"Banco Exemplo, S.A.",501141707,Extrato 2025-12,7.8,0,0.0,7.8,0.0,debito_conta,pago,
+H0142,2025-12-31,2025-12-31,pessoal,PESSOAL_REMUNERACOES,632x,Ricardo Alves,-,RV 2025-12 Ricardo Alves,1282.0,0,0.0,1282.0,0.0,transferencia,pago,"bruto 1150.00; sub.ref 132,00; SS trab 126.50; IRS 180.55"
+H0143,2025-12-31,,pessoal,PESSOAL_ENCARGOS,635,Segurança Social,-,TSU entidade 2025-12 Ricardo Alves,273.12,0,0.0,273.12,0.0,guia_mes_seguinte,pago,
+H0144,2025-12-31,2026-01-07,receita,REC_CONSULTORIA,7211,"Quadrante Sistemas, Lda",506978800,FT 2025A/0020,4754.4,23,1093.51,5847.91,0.0,transferencia,recebido,
+H0145,2026-01-01,2026-01-01,gasto,FSE_RENDA,6261,Helena Marques Duarte,192984160,Recibo renda 2026-01,1350.0,0,0.0,1350.0,0.0,transferencia,pago,retenção 25% IRS = 337.50; pago líquido 1012.50
+H0146,2026-01-01,2026-01-08,gasto,FSE_HONORARIOS,6224,"Contas Certas - Contabilidade, Lda",519672739,FT CC2026/01,150.0,23,34.5,184.5,34.5,transferencia,pago,
+H0147,2026-01-02,2026-01-03,receita,REC_AL,7212,Hóspede (consumidor final),999999990,FR 2026B/0001,750.0,6,45.0,795.0,0.0,payout_plataforma,recebido,
+H0148,2026-01-03,2026-01-15,gasto,FSE_COMUNICACAO,6262,"Ondanet Comunicações, S.A.",501778489,FT ON2026/01,38.2,23,8.79,46.99,8.79,debito_direto,pago,
+H0149,2026-01-05,2026-01-28,gasto,FSE_DESLOCACOES,6251,"AutoPass Portagens, S.A.",501362703,FT AP2026/01,20.81,23,4.79,25.6,0.0,conta_pessoal_socio,pago,portagens; reembolsado ao sócio
+H0150,2026-01-08,2026-01-21,gasto,FSE_ELETRICIDADE_AL,6241,"LuzViva Energia, S.A.",506488764,FT LV2026/01,31.85,6,1.91,33.76,1.91,debito_direto,pago,
+H0151,2026-01-08,2026-01-21,gasto,FSE_ELETRICIDADE_AL,6241,"LuzViva Energia, S.A.",506488764,FT LV2026/01,19.33,23,4.45,23.78,4.45,debito_direto,pago,
+H0152,2026-01-08,2026-01-08,gasto,FSE_COMBUSTIVEL,6242,"Petrovia Combustíveis, S.A.",506804577,FS PV2026010,36.55,23,8.41,44.96,4.21,cartao_empresa,pago,gasóleo: IVA dedutível 50%
+H0153,2026-01-09,2026-01-28,gasto,MATERIAS_3D,6231,"MercaNova Portugal, Unipessoal Lda",516714759,FT MN2026/01,27.28,23,6.27,33.55,6.27,cartao_pessoal_socio,pago,pago pelo sócio - reembolsado
+H0154,2026-01-10,2026-01-10,gasto,OUTROS_DONATIVOS,6882,Igreja Comunidade Esperança - Associação,501079815,D-2026-01,450.0,0,0.0,450.0,0.0,transferencia,pago,
+H0155,2026-01-15,2026-01-06,receita,REC_3D,7213,Consumidor final,999999990,FR 2026B/0002,56.91,23,13.09,70.0,0.0,mbway,recebido,
+H0156,2026-01-23,2026-01-15,receita,REC_3D,7213,"Ateliê Moldura Viva, Lda",519320816,FR 2026B/0003,56.91,23,13.09,70.0,0.0,transferencia,recebido,
+H0157,2026-01-31,2026-01-03,gasto,FSE_COMISSOES_PLATAFORMA,6228,StayNest Ireland Ltd,IE9876543ZW,SN-PT-2026-01,23.85,0,0.0,23.85,0.0,deduzido_no_payout,pago,autoliquidação IVA 23% (liquidado = dedutível)
+H0158,2026-01-31,2026-01-31,gasto,FSE_SERVICOS_BANCARIOS,6981/6812,"Banco Exemplo, S.A.",501141707,Extrato 2026-01,7.8,0,0.0,7.8,0.0,debito_conta,pago,
+H0159,2026-01-31,2026-01-31,pessoal,PESSOAL_REMUNERACOES,632x,Ricardo Alves,-,RV 2026-01 Ricardo Alves,1332.0,0,0.0,1332.0,0.0,transferencia,pago,"bruto 1200.00; sub.ref 132,00; SS trab 132.00; IRS 188.04"
+H0160,2026-01-31,,pessoal,PESSOAL_ENCARGOS,635,Segurança Social,-,TSU entidade 2026-01 Ricardo Alves,285.0,0,0.0,285.0,0.0,guia_mes_seguinte,pago,
+H0161,2026-01-31,2026-02-04,receita,REC_CONSULTORIA,7211,"Quadrante Sistemas, Lda",506978800,FT 2026A/0001,4560.0,23,1048.8,5608.8,0.0,transferencia,recebido,
+H0162,2026-02-01,2026-02-01,gasto,FSE_RENDA,6261,Helena Marques Duarte,192984160,Recibo renda 2026-02,1350.0,0,0.0,1350.0,0.0,transferencia,pago,retenção 25% IRS = 337.50; pago líquido 1012.50
+H0163,2026-02-01,2026-02-08,gasto,FSE_HONORARIOS,6224,"Contas Certas - Contabilidade, Lda",519672739,FT CC2026/02,150.0,23,34.5,184.5,34.5,transferencia,pago,
+H0164,2026-02-01,2026-02-07,gasto,FSE_RENTING_VIATURA,6261,"Rodalis Renting, S.A.",503477877,FT RR2026/02,316.26,23,72.74,389.0,0.0,debito_direto,pago,viatura ligeira passageiros: IVA não dedutível; tributação autónoma
+H0165,2026-02-03,2026-02-15,gasto,FSE_COMUNICACAO,6262,"Ondanet Comunicações, S.A.",501778489,FT ON2026/02,38.2,23,8.79,46.99,8.79,debito_direto,pago,
+H0166,2026-02-03,2026-02-04,receita,REC_AL,7212,Hóspede (consumidor final),999999990,FR 2026B/0004,689.62,6,41.38,731.0,0.0,payout_plataforma,recebido,
+H0167,2026-02-05,2026-02-28,gasto,FSE_DESLOCACOES,6251,"AutoPass Portagens, S.A.",501362703,FT AP2026/02,27.2,23,6.26,33.46,0.0,conta_pessoal_socio,pago,portagens; reembolsado ao sócio
+H0168,2026-02-08,2026-02-21,gasto,FSE_ELETRICIDADE_AL,6241,"LuzViva Energia, S.A.",506488764,FT LV2026/02,31.85,6,1.91,33.76,1.91,debito_direto,pago,
+H0169,2026-02-08,2026-02-21,gasto,FSE_ELETRICIDADE_AL,6241,"LuzViva Energia, S.A.",506488764,FT LV2026/02,16.43,23,3.78,20.21,3.78,debito_direto,pago,
+H0170,2026-02-08,2026-02-08,gasto,FSE_COMBUSTIVEL,6242,"Petrovia Combustíveis, S.A.",506804577,FS PV2026020,49.12,23,11.3,60.42,5.65,cartao_empresa,pago,gasóleo: IVA dedutível 50%
+H0171,2026-02-08,2026-02-28,gasto,MATERIAS_3D,6231,"MercaNova Portugal, Unipessoal Lda",516714759,FT MN2026/02,52.45,23,12.06,64.51,12.06,cartao_pessoal_socio,pago,pago pelo sócio - reembolsado
+H0172,2026-02-10,2026-02-10,gasto,OUTROS_DONATIVOS,6882,Igreja Comunidade Esperança - Associação,501079815,D-2026-02,450.0,0,0.0,450.0,0.0,transferencia,pago,
+H0173,2026-02-15,2026-02-18,estado,ESTADO_IVA,2436,Autoridade Tributária,-,IVA 4.º trimestre,3228.97,0,0.0,3228.97,0.0,pagamento_estado,pago,
+H0174,2026-02-17,2026-02-18,receita,REC_AL,7212,Hóspede (consumidor final),999999990,FR 2026B/0005,250.0,6,15.0,265.0,0.0,payout_plataforma,recebido,
+H0175,2026-02-28,2026-02-04,gasto,FSE_COMISSOES_PLATAFORMA,6228,StayNest Ireland Ltd,IE9876543ZW,SN-PT-2026-02,21.93,0,0.0,21.93,0.0,deduzido_no_payout,pago,autoliquidação IVA 23% (liquidado = dedutível)
+H0176,2026-02-28,2026-02-18,gasto,FSE_COMISSOES_PLATAFORMA,6228,StayNest Ireland Ltd,IE9876543ZW,SN-PT-2026-02,7.95,0,0.0,7.95,0.0,deduzido_no_payout,pago,autoliquidação IVA 23% (liquidado = dedutível)
+H0177,2026-02-28,2026-02-28,gasto,FSE_SERVICOS_BANCARIOS,6981/6812,"Banco Exemplo, S.A.",501141707,Extrato 2026-02,7.8,0,0.0,7.8,0.0,debito_conta,pago,
+H0178,2026-02-28,2026-02-28,pessoal,PESSOAL_REMUNERACOES,632x,Ricardo Alves,-,RV 2026-02 Ricardo Alves,1332.0,0,0.0,1332.0,0.0,transferencia,pago,"bruto 1200.00; sub.ref 132,00; SS trab 132.00; IRS 188.04"
+H0179,2026-02-28,,pessoal,PESSOAL_ENCARGOS,635,Segurança Social,-,TSU entidade 2026-02 Ricardo Alves,285.0,0,0.0,285.0,0.0,guia_mes_seguinte,pago,
+H0180,2026-02-28,2026-03-03,receita,REC_CONSULTORIA,7211,"Quadrante Sistemas, Lda",506978800,FT 2026A/0002,4800.0,23,1104.0,5904.0,0.0,transferencia,recebido,
+H0181,2026-03-01,2026-03-01,gasto,FSE_RENDA,6261,Helena Marques Duarte,192984160,Recibo renda 2026-03,1350.0,0,0.0,1350.0,0.0,transferencia,pago,retenção 25% IRS = 337.50; pago líquido 1012.50
+H0182,2026-03-01,2026-03-08,gasto,FSE_HONORARIOS,6224,"Contas Certas - Contabilidade, Lda",519672739,FT CC2026/03,150.0,23,34.5,184.5,34.5,transferencia,pago,
+H0183,2026-03-01,2026-03-07,gasto,FSE_RENTING_VIATURA,6261,"Rodalis Renting, S.A.",503477877,FT RR2026/03,316.26,23,72.74,389.0,0.0,debito_direto,pago,viatura ligeira passageiros: IVA não dedutível; tributação autónoma
+H0184,2026-03-01,2026-03-02,receita,REC_AL,7212,Hóspede (consumidor final),999999990,FR 2026B/0006,524.53,6,31.47,556.0,0.0,payout_plataforma,recebido,
+H0185,2026-03-02,2026-03-03,gasto,FSE_SOFTWARE_CLOUD,6228,Nimbus Cloud Ltd,IE3456789KH,INV-2026-03,22.8,0,0.0,22.8,0.0,cartao_empresa,pago,USD 25; autoliquidação
+H0186,2026-03-03,2026-03-15,gasto,FSE_COMUNICACAO,6262,"Ondanet Comunicações, S.A.",501778489,FT ON2026/03,38.2,23,8.79,46.99,8.79,debito_direto,pago,
+H0187,2026-03-05,2026-03-28,gasto,FSE_DESLOCACOES,6251,"AutoPass Portagens, S.A.",501362703,FT AP2026/03,22.42,23,5.16,27.58,0.0,conta_pessoal_socio,pago,portagens; reembolsado ao sócio
+H0188,2026-03-08,2026-03-21,gasto,FSE_ELETRICIDADE_AL,6241,"LuzViva Energia, S.A.",506488764,FT LV2026/03,31.85,6,1.91,33.76,1.91,debito_direto,pago,
+H0189,2026-03-08,2026-03-21,gasto,FSE_ELETRICIDADE_AL,6241,"LuzViva Energia, S.A.",506488764,FT LV2026/03,14.98,23,3.45,18.43,3.45,debito_direto,pago,
+H0190,2026-03-10,2026-03-10,gasto,FSE_COMBUSTIVEL,6242,"Petrovia Combustíveis, S.A.",506804577,FS PV2026030,46.01,23,10.58,56.59,5.29,cartao_empresa,pago,gasóleo: IVA dedutível 50%
+H0191,2026-03-10,2026-03-10,gasto,OUTROS_DONATIVOS,6882,Igreja Comunidade Esperança - Associação,501079815,D-2026-03,450.0,0,0.0,450.0,0.0,transferencia,pago,
+H0192,2026-03-11,2026-03-12,receita,REC_AL,7212,Hóspede (consumidor final),999999990,FR 2026B/0007,675.47,6,40.53,716.0,0.0,payout_plataforma,recebido,
+H0193,2026-03-19,2026-03-20,receita,REC_AL,7212,Hóspede (consumidor final),999999990,FR 2026B/0008,624.53,6,37.47,662.0,0.0,payout_plataforma,recebido,
+H0194,2026-03-20,2026-03-28,gasto,MATERIAS_3D,6231,"MercaNova Portugal, Unipessoal Lda",516714759,FT MN2026/03,39.36,23,9.05,48.41,9.05,cartao_pessoal_socio,pago,pago pelo sócio - reembolsado
+H0195,2026-03-24,2026-03-24,gasto,FSE_COMBUSTIVEL,6242,"Petrovia Combustíveis, S.A.",506804577,FS PV2026031,38.71,23,8.9,47.61,4.45,cartao_empresa,pago,gasóleo: IVA dedutível 50%
+H0196,2026-03-26,2026-03-13,receita,REC_3D,7213,Consumidor final,999999990,FR 2026B/0009,24.39,23,5.61,30.0,0.0,mbway,recebido,
+H0197,2026-03-31,2026-03-02,gasto,FSE_COMISSOES_PLATAFORMA,6228,StayNest Ireland Ltd,IE9876543ZW,SN-PT-2026-03,16.68,0,0.0,16.68,0.0,deduzido_no_payout,pago,autoliquidação IVA 23% (liquidado = dedutível)
+H0198,2026-03-31,2026-03-12,gasto,FSE_COMISSOES_PLATAFORMA,6228,StayNest Ireland Ltd,IE9876543ZW,SN-PT-2026-03,21.48,0,0.0,21.48,0.0,deduzido_no_payout,pago,autoliquidação IVA 23% (liquidado = dedutível)
+H0199,2026-03-31,2026-03-20,gasto,FSE_COMISSOES_PLATAFORMA,6228,StayNest Ireland Ltd,IE9876543ZW,SN-PT-2026-03,19.86,0,0.0,19.86,0.0,deduzido_no_payout,pago,autoliquidação IVA 23% (liquidado = dedutível)
+H0200,2026-03-31,2026-03-31,gasto,FSE_SERVICOS_BANCARIOS,6981/6812,"Banco Exemplo, S.A.",501141707,Extrato 2026-03,7.8,0,0.0,7.8,0.0,debito_conta,pago,
+H0201,2026-03-31,2026-03-31,pessoal,PESSOAL_REMUNERACOES,632x,Ricardo Alves,-,RV 2026-03 Ricardo Alves,1332.0,0,0.0,1332.0,0.0,transferencia,pago,"bruto 1200.00; sub.ref 132,00; SS trab 132.00; IRS 188.04"
+H0202,2026-03-31,,pessoal,PESSOAL_ENCARGOS,635,Segurança Social,-,TSU entidade 2026-03 Ricardo Alves,285.0,0,0.0,285.0,0.0,guia_mes_seguinte,pago,
+H0203,2026-03-31,2026-03-31,pessoal,PESSOAL_REMUNERACOES,632x,Marta Alves,-,RV 2026-03 Marta Alves,1052.0,0,0.0,1052.0,0.0,transferencia,pago,"bruto 920.00; sub.ref 132,00; SS trab 101.20; IRS 13.98"
+H0204,2026-03-31,,pessoal,PESSOAL_ENCARGOS,635,Segurança Social,-,TSU entidade 2026-03 Marta Alves,218.5,0,0.0,218.5,0.0,guia_mes_seguinte,pago,
+H0205,2026-03-31,2026-04-14,receita,REC_CONSULTORIA,7211,"Quadrante Sistemas, Lda",506978800,FT 2026A/0003,4560.0,23,1048.8,5608.8,0.0,transferencia,recebido,
+H0206,2026-04-01,2026-04-01,gasto,FSE_RENDA,6261,Helena Marques Duarte,192984160,Recibo renda 2026-04,1350.0,0,0.0,1350.0,0.0,transferencia,pago,retenção 25% IRS = 337.50; pago líquido 1012.50
+H0207,2026-04-01,2026-04-08,gasto,FSE_HONORARIOS,6224,"Contas Certas - Contabilidade, Lda",519672739,FT CC2026/04,150.0,23,34.5,184.5,34.5,transferencia,pago,
+H0208,2026-04-01,2026-04-07,gasto,FSE_RENTING_VIATURA,6261,"Rodalis Renting, S.A.",503477877,FT RR2026/04,316.26,23,72.74,389.0,0.0,debito_direto,pago,viatura ligeira passageiros: IVA não dedutível; tributação autónoma
+H0209,2026-04-02,2026-04-03,gasto,FSE_SOFTWARE_CLOUD,6228,Nimbus Cloud Ltd,IE3456789KH,INV-2026-04,22.95,0,0.0,22.95,0.0,cartao_empresa,pago,USD 25; autoliquidação
+H0210,2026-04-03,2026-04-15,gasto,FSE_COMUNICACAO,6262,"Ondanet Comunicações, S.A.",501778489,FT ON2026/04,38.2,23,8.79,46.99,8.79,debito_direto,pago,
+H0211,2026-04-03,2026-04-04,receita,REC_AL,7212,Hóspede (consumidor final),999999990,FR 2026B/0010,250.0,6,15.0,265.0,0.0,payout_plataforma,recebido,
+H0212,2026-04-05,2026-04-28,gasto,FSE_DESLOCACOES,6251,"AutoPass Portagens, S.A.",501362703,FT AP2026/04,18.87,23,4.34,23.21,0.0,conta_pessoal_socio,pago,portagens; reembolsado ao sócio
+H0213,2026-04-08,2026-04-21,gasto,FSE_ELETRICIDADE_AL,6241,"LuzViva Energia, S.A.",506488764,FT LV2026/04,31.85,6,1.91,33.76,1.91,debito_direto,pago,
+H0214,2026-04-08,2026-04-21,gasto,FSE_ELETRICIDADE_AL,6241,"LuzViva Energia, S.A.",506488764,FT LV2026/04,19.33,23,4.45,23.78,4.45,debito_direto,pago,
+H0215,2026-04-09,2026-04-09,investimento,EQUIPAMENTO_3D,4331,"Maker3D Store, Lda",516494155,FT M3D2026/118,650.41,23,149.59,800.0,149.59,transferencia,pago,2.ª impressora 3D
+H0216,2026-04-09,2026-04-10,receita,REC_AL,7212,Hóspede (consumidor final),999999990,FR 2026B/0011,460.38,6,27.62,488.0,0.0,payout_plataforma,recebido,
+H0217,2026-04-10,2026-04-10,gasto,OUTROS_DONATIVOS,6882,Igreja Comunidade Esperança - Associação,501079815,D-2026-04,450.0,0,0.0,450.0,0.0,transferencia,pago,
+H0218,2026-04-11,2026-04-28,gasto,MATERIAS_3D,6231,"MercaNova Portugal, Unipessoal Lda",516714759,FT MN2026/04,31.6,23,7.27,38.87,7.27,cartao_pessoal_socio,pago,pago pelo sócio - reembolsado
+H0219,2026-04-14,2026-04-14,gasto,FSE_COMBUSTIVEL,6242,"Petrovia Combustíveis, S.A.",506804577,FS PV2026040,52.02,23,11.96,63.98,5.98,cartao_empresa,pago,gasóleo: IVA dedutível 50%
+H0220,2026-04-17,2026-04-18,receita,REC_AL,7212,Hóspede (consumidor final),999999990,FR 2026B/0012,450.0,6,27.0,477.0,0.0,payout_plataforma,recebido,
+H0221,2026-04-24,2026-04-25,receita,REC_AL,7212,Hóspede (consumidor final),999999990,FR 2026B/0013,750.0,6,45.0,795.0,0.0,payout_plataforma,recebido,
+H0222,2026-04-27,2026-04-09,receita,REC_3D,7213,Consumidor final,999999990,FR 2026B/0014,81.3,23,18.7,100.0,0.0,mbway,recebido,
+H0223,2026-04-30,2026-04-04,gasto,FSE_COMISSOES_PLATAFORMA,6228,StayNest Ireland Ltd,IE9876543ZW,SN-PT-2026-04,7.95,0,0.0,7.95,0.0,deduzido_no_payout,pago,autoliquidação IVA 23% (liquidado = dedutível)
+H0224,2026-04-30,2026-04-10,gasto,FSE_COMISSOES_PLATAFORMA,6228,StayNest Ireland Ltd,IE9876543ZW,SN-PT-2026-04,14.64,0,0.0,14.64,0.0,deduzido_no_payout,pago,autoliquidação IVA 23% (liquidado = dedutível)
+H0225,2026-04-30,2026-04-18,gasto,FSE_COMISSOES_PLATAFORMA,6228,StayNest Ireland Ltd,IE9876543ZW,SN-PT-2026-04,14.31,0,0.0,14.31,0.0,deduzido_no_payout,pago,autoliquidação IVA 23% (liquidado = dedutível)
+H0226,2026-04-30,2026-04-25,gasto,FSE_COMISSOES_PLATAFORMA,6228,StayNest Ireland Ltd,IE9876543ZW,SN-PT-2026-04,23.85,0,0.0,23.85,0.0,deduzido_no_payout,pago,autoliquidação IVA 23% (liquidado = dedutível)
+H0227,2026-04-30,2026-04-30,gasto,FSE_SERVICOS_BANCARIOS,6981/6812,"Banco Exemplo, S.A.",501141707,Extrato 2026-04,7.8,0,0.0,7.8,0.0,debito_conta,pago,
+H0228,2026-04-30,2026-04-30,pessoal,PESSOAL_REMUNERACOES,632x,Ricardo Alves,-,RV 2026-04 Ricardo Alves,1332.0,0,0.0,1332.0,0.0,transferencia,pago,"bruto 1200.00; sub.ref 132,00; SS trab 132.00; IRS 188.04"
+H0229,2026-04-30,,pessoal,PESSOAL_ENCARGOS,635,Segurança Social,-,TSU entidade 2026-04 Ricardo Alves,285.0,0,0.0,285.0,0.0,guia_mes_seguinte,pago,
+H0230,2026-04-30,2026-04-30,pessoal,PESSOAL_REMUNERACOES,632x,Marta Alves,-,RV 2026-04 Marta Alves,1052.0,0,0.0,1052.0,0.0,transferencia,pago,"bruto 920.00; sub.ref 132,00; SS trab 101.20; IRS 13.98"
+H0231,2026-04-30,,pessoal,PESSOAL_ENCARGOS,635,Segurança Social,-,TSU entidade 2026-04 Marta Alves,218.5,0,0.0,218.5,0.0,guia_mes_seguinte,pago,
+H0232,2026-04-30,2026-05-12,receita,REC_CONSULTORIA,7211,"Quadrante Sistemas, Lda",506978800,FT 2026A/0004,4560.0,23,1048.8,5608.8,0.0,transferencia,recebido,
+H0233,2026-05-01,2026-05-01,gasto,FSE_RENDA,6261,Helena Marques Duarte,192984160,Recibo renda 2026-05,1350.0,0,0.0,1350.0,0.0,transferencia,pago,retenção 25% IRS = 337.50; pago líquido 1012.50
+H0234,2026-05-01,2026-05-08,gasto,FSE_HONORARIOS,6224,"Contas Certas - Contabilidade, Lda",519672739,FT CC2026/05,150.0,23,34.5,184.5,34.5,transferencia,pago,
+H0235,2026-05-01,2026-05-07,gasto,FSE_RENTING_VIATURA,6261,"Rodalis Renting, S.A.",503477877,FT RR2026/05,316.26,23,72.74,389.0,0.0,debito_direto,pago,viatura ligeira passageiros: IVA não dedutível; tributação autónoma
+H0236,2026-05-01,2026-05-02,receita,REC_AL,7212,Hóspede (consumidor final),999999990,FR 2026B/0015,624.53,6,37.47,662.0,0.0,payout_plataforma,recebido,
+H0237,2026-05-02,2026-05-03,gasto,FSE_SOFTWARE_CLOUD,6228,Nimbus Cloud Ltd,IE3456789KH,INV-2026-05,22.86,0,0.0,22.86,0.0,cartao_empresa,pago,USD 25; autoliquidação
+H0238,2026-05-03,2026-05-15,gasto,FSE_COMUNICACAO,6262,"Ondanet Comunicações, S.A.",501778489,FT ON2026/05,38.2,23,8.79,46.99,8.79,debito_direto,pago,
+H0239,2026-05-05,2026-05-28,gasto,FSE_DESLOCACOES,6251,"AutoPass Portagens, S.A.",501362703,FT AP2026/05,21.58,23,4.96,26.54,0.0,conta_pessoal_socio,pago,portagens; reembolsado ao sócio
+H0240,2026-05-07,2026-05-08,receita,REC_AL,7212,Hóspede (consumidor final),999999990,FR 2026B/0016,750.0,6,45.0,795.0,0.0,payout_plataforma,recebido,
+H0241,2026-05-08,2026-05-21,gasto,FSE_ELETRICIDADE_AL,6241,"LuzViva Energia, S.A.",506488764,FT LV2026/05,31.85,6,1.91,33.76,1.91,debito_direto,pago,
+H0242,2026-05-08,2026-05-21,gasto,FSE_ELETRICIDADE_AL,6241,"LuzViva Energia, S.A.",506488764,FT LV2026/05,23.68,23,5.45,29.13,5.45,debito_direto,pago,
+H0243,2026-05-10,2026-05-10,gasto,OUTROS_DONATIVOS,6882,Igreja Comunidade Esperança - Associação,501079815,D-2026-05,450.0,0,0.0,450.0,0.0,transferencia,pago,
+H0244,2026-05-11,2026-05-12,receita,REC_AL,7212,Hóspede (consumidor final),999999990,FR 2026B/0017,500.0,6,30.0,530.0,0.0,payout_plataforma,recebido,
+H0245,2026-05-15,2026-05-18,estado,ESTADO_IVA,2436,Autoridade Tributária,-,IVA 1.º trimestre,3249.98,0,0.0,3249.98,0.0,pagamento_estado,pago,
+H0246,2026-05-15,2026-05-29,estado,ESTADO_IRC,2411/241,Autoridade Tributária,-,IRC 2025 (Modelo 22),1236.8,0,0.0,1236.8,0.0,pagamento_estado,pago,
+H0247,2026-05-16,2026-05-17,receita,REC_AL,7212,Hóspede (consumidor final),999999990,FR 2026B/0018,315.09,6,18.91,334.0,0.0,payout_plataforma,recebido,
+H0248,2026-05-17,2026-05-17,gasto,FSE_COMBUSTIVEL,6242,"Petrovia Combustíveis, S.A.",506804577,FS PV2026050,55.91,23,12.86,68.77,6.43,cartao_empresa,pago,gasóleo: IVA dedutível 50%
+H0249,2026-05-22,2026-05-23,receita,REC_AL,7212,Hóspede (consumidor final),999999990,FR 2026B/0019,575.47,6,34.53,610.0,0.0,payout_plataforma,recebido,
+H0250,2026-05-22,2026-05-22,receita,REC_3D,7213,Consumidor final,999999990,FR 2026B/0020,56.91,23,13.09,70.0,0.0,mbway,recebido,
+H0251,2026-05-31,2026-05-02,gasto,FSE_COMISSOES_PLATAFORMA,6228,StayNest Ireland Ltd,IE9876543ZW,SN-PT-2026-05,19.86,0,0.0,19.86,0.0,deduzido_no_payout,pago,autoliquidação IVA 23% (liquidado = dedutível)
+H0252,2026-05-31,2026-05-08,gasto,FSE_COMISSOES_PLATAFORMA,6228,StayNest Ireland Ltd,IE9876543ZW,SN-PT-2026-05,23.85,0,0.0,23.85,0.0,deduzido_no_payout,pago,autoliquidação IVA 23% (liquidado = dedutível)
+H0253,2026-05-31,2026-05-12,gasto,FSE_COMISSOES_PLATAFORMA,6228,StayNest Ireland Ltd,IE9876543ZW,SN-PT-2026-05,15.9,0,0.0,15.9,0.0,deduzido_no_payout,pago,autoliquidação IVA 23% (liquidado = dedutível)
+H0254,2026-05-31,2026-05-17,gasto,FSE_COMISSOES_PLATAFORMA,6228,StayNest Ireland Ltd,IE9876543ZW,SN-PT-2026-05,10.02,0,0.0,10.02,0.0,deduzido_no_payout,pago,autoliquidação IVA 23% (liquidado = dedutível)
+H0255,2026-05-31,2026-05-23,gasto,FSE_COMISSOES_PLATAFORMA,6228,StayNest Ireland Ltd,IE9876543ZW,SN-PT-2026-05,18.3,0,0.0,18.3,0.0,deduzido_no_payout,pago,autoliquidação IVA 23% (liquidado = dedutível)
+H0256,2026-05-31,2026-05-31,gasto,FSE_SERVICOS_BANCARIOS,6981/6812,"Banco Exemplo, S.A.",501141707,Extrato 2026-05,7.8,0,0.0,7.8,0.0,debito_conta,pago,
+H0257,2026-05-31,2026-05-31,pessoal,PESSOAL_REMUNERACOES,632x,Ricardo Alves,-,RV 2026-05 Ricardo Alves,1332.0,0,0.0,1332.0,0.0,transferencia,pago,"bruto 1200.00; sub.ref 132,00; SS trab 132.00; IRS 188.04"
+H0258,2026-05-31,,pessoal,PESSOAL_ENCARGOS,635,Segurança Social,-,TSU entidade 2026-05 Ricardo Alves,285.0,0,0.0,285.0,0.0,guia_mes_seguinte,pago,
+H0259,2026-05-31,2026-05-31,pessoal,PESSOAL_REMUNERACOES,632x,Marta Alves,-,RV 2026-05 Marta Alves,1052.0,0,0.0,1052.0,0.0,transferencia,pago,"bruto 920.00; sub.ref 132,00; SS trab 101.20; IRS 13.98"
+H0260,2026-05-31,,pessoal,PESSOAL_ENCARGOS,635,Segurança Social,-,TSU entidade 2026-05 Marta Alves,218.5,0,0.0,218.5,0.0,guia_mes_seguinte,pago,
+H0261,2026-05-31,2026-06-11,receita,REC_CONSULTORIA,7211,"Quadrante Sistemas, Lda",506978800,FT 2026A/0005,4800.0,23,1104.0,5904.0,0.0,transferencia,recebido,
+H0262,2026-06-01,2026-06-01,gasto,FSE_RENDA,6261,Helena Marques Duarte,192984160,Recibo renda 2026-06,1350.0,0,0.0,1350.0,0.0,transferencia,pago,retenção 25% IRS = 337.50; pago líquido 1012.50
+H0263,2026-06-01,2026-06-08,gasto,FSE_HONORARIOS,6224,"Contas Certas - Contabilidade, Lda",519672739,FT CC2026/06,150.0,23,34.5,184.5,34.5,transferencia,pago,
+H0264,2026-06-01,2026-06-07,gasto,FSE_RENTING_VIATURA,6261,"Rodalis Renting, S.A.",503477877,FT RR2026/06,316.26,23,72.74,389.0,0.0,debito_direto,pago,viatura ligeira passageiros: IVA não dedutível; tributação autónoma
+H0265,2026-06-01,2026-06-02,receita,REC_AL,7212,Hóspede (consumidor final),999999990,FR 2026B/0021,404.72,6,24.28,429.0,0.0,payout_plataforma,recebido,
+H0266,2026-06-02,2026-06-03,gasto,FSE_SOFTWARE_CLOUD,6228,Nimbus Cloud Ltd,IE3456789KH,INV-2026-06,22.74,0,0.0,22.74,0.0,cartao_empresa,pago,USD 25; autoliquidação
+H0267,2026-06-03,2026-06-15,gasto,FSE_COMUNICACAO,6262,"Ondanet Comunicações, S.A.",501778489,FT ON2026/06,38.2,23,8.79,46.99,8.79,debito_direto,pago,
+H0268,2026-06-05,2026-06-28,gasto,FSE_DESLOCACOES,6251,"AutoPass Portagens, S.A.",501362703,FT AP2026/06,12.51,23,2.88,15.39,0.0,conta_pessoal_socio,pago,portagens; reembolsado ao sócio
+H0269,2026-06-06,2026-06-06,gasto,FSE_COMBUSTIVEL,6242,"Petrovia Combustíveis, S.A.",506804577,FS PV2026060,35.49,23,8.16,43.65,4.08,cartao_empresa,pago,gasóleo: IVA dedutível 50%
+H0270,2026-06-06,2026-06-07,receita,REC_AL,7212,Hóspede (consumidor final),999999990,FR 2026B/0022,624.53,6,37.47,662.0,0.0,payout_plataforma,recebido,
+H0271,2026-06-07,2026-06-22,receita,REC_3D,7213,Consumidor final,999999990,FR 2026B/0026,121.95,23,28.05,150.0,0.0,mbway,recebido,
+H0272,2026-06-07,2026-06-20,receita,REC_3D,7213,"Ateliê Moldura Viva, Lda",519320816,FR 2026B/0028,40.65,23,9.35,50.0,0.0,transferencia,recebido,
+H0273,2026-06-08,2026-06-21,gasto,FSE_ELETRICIDADE_AL,6241,"LuzViva Energia, S.A.",506488764,FT LV2026/06,31.85,6,1.91,33.76,1.91,debito_direto,pago,
+H0274,2026-06-08,2026-06-21,gasto,FSE_ELETRICIDADE_AL,6241,"LuzViva Energia, S.A.",506488764,FT LV2026/06,29.48,23,6.78,36.26,6.78,debito_direto,pago,
+H0275,2026-06-10,2026-06-10,gasto,OUTROS_DONATIVOS,6882,Igreja Comunidade Esperança - Associação,501079815,D-2026-06,450.0,0,0.0,450.0,0.0,transferencia,pago,
+H0276,2026-06-12,2026-06-13,receita,REC_AL,7212,Hóspede (consumidor final),999999990,FR 2026B/0023,675.47,6,40.53,716.0,0.0,payout_plataforma,recebido,
+H0277,2026-06-16,2026-06-17,receita,REC_AL,7212,Hóspede (consumidor final),999999990,FR 2026B/0024,230.19,6,13.81,244.0,0.0,payout_plataforma,recebido,
+H0278,2026-06-18,2026-06-24,receita,REC_3D,7213,"Ateliê Moldura Viva, Lda",519320816,FR 2026B/0027,81.3,23,18.7,100.0,0.0,transferencia,recebido,
+H0279,2026-06-20,2026-06-28,gasto,MATERIAS_3D,6231,"MercaNova Portugal, Unipessoal Lda",516714759,FT MN2026/06,57.98,23,13.34,71.32,13.34,cartao_pessoal_socio,pago,pago pelo sócio - reembolsado
+H0280,2026-06-21,2026-06-22,receita,REC_AL,7212,Hóspede (consumidor final),999999990,FR 2026B/0025,315.09,6,18.91,334.0,0.0,payout_plataforma,recebido,
+H0281,2026-06-25,2026-06-25,gasto,FSE_COMBUSTIVEL,6242,"Petrovia Combustíveis, S.A.",506804577,FS PV2026061,49.94,23,11.49,61.43,5.75,cartao_empresa,pago,gasóleo: IVA dedutível 50%
+H0282,2026-06-30,2026-06-02,gasto,FSE_COMISSOES_PLATAFORMA,6228,StayNest Ireland Ltd,IE9876543ZW,SN-PT-2026-06,12.87,0,0.0,12.87,0.0,deduzido_no_payout,pago,autoliquidação IVA 23% (liquidado = dedutível)
+H0283,2026-06-30,2026-06-07,gasto,FSE_COMISSOES_PLATAFORMA,6228,StayNest Ireland Ltd,IE9876543ZW,SN-PT-2026-06,19.86,0,0.0,19.86,0.0,deduzido_no_payout,pago,autoliquidação IVA 23% (liquidado = dedutível)
+H0284,2026-06-30,2026-06-13,gasto,FSE_COMISSOES_PLATAFORMA,6228,StayNest Ireland Ltd,IE9876543ZW,SN-PT-2026-06,21.48,0,0.0,21.48,0.0,deduzido_no_payout,pago,autoliquidação IVA 23% (liquidado = dedutível)
+H0285,2026-06-30,2026-06-17,gasto,FSE_COMISSOES_PLATAFORMA,6228,StayNest Ireland Ltd,IE9876543ZW,SN-PT-2026-06,7.32,0,0.0,7.32,0.0,deduzido_no_payout,pago,autoliquidação IVA 23% (liquidado = dedutível)
+H0286,2026-06-30,2026-06-22,gasto,FSE_COMISSOES_PLATAFORMA,6228,StayNest Ireland Ltd,IE9876543ZW,SN-PT-2026-06,10.02,0,0.0,10.02,0.0,deduzido_no_payout,pago,autoliquidação IVA 23% (liquidado = dedutível)
+H0287,2026-06-30,2026-06-30,gasto,FSE_SERVICOS_BANCARIOS,6981/6812,"Banco Exemplo, S.A.",501141707,Extrato 2026-06,7.8,0,0.0,7.8,0.0,debito_conta,pago,
+H0288,2026-06-30,2026-06-30,pessoal,PESSOAL_REMUNERACOES,632x,Ricardo Alves,-,RV 2026-06 Ricardo Alves,1332.0,0,0.0,1332.0,0.0,transferencia,pago,"bruto 1200.00; sub.ref 132,00; SS trab 132.00; IRS 188.04"
+H0289,2026-06-30,,pessoal,PESSOAL_ENCARGOS,635,Segurança Social,-,TSU entidade 2026-06 Ricardo Alves,285.0,0,0.0,285.0,0.0,guia_mes_seguinte,pago,
+H0290,2026-06-30,2026-06-30,pessoal,PESSOAL_REMUNERACOES,632x,Marta Alves,-,RV 2026-06 Marta Alves,1052.0,0,0.0,1052.0,0.0,transferencia,pago,"bruto 920.00; sub.ref 132,00; SS trab 101.20; IRS 13.98"
+H0291,2026-06-30,,pessoal,PESSOAL_ENCARGOS,635,Segurança Social,-,TSU entidade 2026-06 Marta Alves,218.5,0,0.0,218.5,0.0,guia_mes_seguinte,pago,
+H0292,2026-06-30,2026-07-15,receita,REC_CONSULTORIA,7211,"Quadrante Sistemas, Lda",506978800,FT 2026A/0006,4800.0,23,1104.0,5904.0,0.0,transferencia,recebido,
+H0293,2026-07-01,2026-07-01,gasto,FSE_RENDA,6261,Helena Marques Duarte,192984160,Recibo renda 2026-07,1350.0,0,0.0,1350.0,0.0,transferencia,pago,retenção 25% IRS = 337.50; pago líquido 1012.50
+H0294,2026-07-01,2026-07-08,gasto,FSE_HONORARIOS,6224,"Contas Certas - Contabilidade, Lda",519672739,FT CC2026/07,150.0,23,34.5,184.5,34.5,transferencia,pago,
+H0295,2026-07-01,2026-07-07,gasto,FSE_RENTING_VIATURA,6261,"Rodalis Renting, S.A.",503477877,FT RR2026/07,316.26,23,72.74,389.0,0.0,debito_direto,pago,viatura ligeira passageiros: IVA não dedutível; tributação autónoma
+H0296,2026-07-01,2026-07-02,receita,REC_AL,7212,Hóspede (consumidor final),999999990,FR 2026B/0029,287.74,6,17.26,305.0,0.0,payout_plataforma,recebido,
+H0297,2026-07-02,2026-07-02,gasto,FSE_COMBUSTIVEL,6242,"Petrovia Combustíveis, S.A.",506804577,FS PV2026070,52.85,23,12.16,65.01,6.08,cartao_empresa,pago,gasóleo: IVA dedutível 50%
+H0298,2026-07-02,2026-07-03,gasto,FSE_SOFTWARE_CLOUD,6228,Nimbus Cloud Ltd,IE3456789KH,INV-2026-07,23.1,0,0.0,23.1,0.0,cartao_empresa,pago,USD 25; autoliquidação
+H0299,2026-07-03,2026-07-15,gasto,FSE_COMUNICACAO,6262,"Ondanet Comunicações, S.A.",501778489,FT ON2026/07,38.2,23,8.79,46.99,8.79,debito_direto,pago,
+H0300,2026-07-05,2026-07-28,gasto,FSE_DESLOCACOES,6251,"AutoPass Portagens, S.A.",501362703,FT AP2026/07,23.05,23,5.3,28.35,0.0,conta_pessoal_socio,pago,portagens; reembolsado ao sócio
+H0301,2026-07-05,2026-07-06,receita,REC_AL,7212,Hóspede (consumidor final),999999990,FR 2026B/0030,689.62,6,41.38,731.0,0.0,payout_plataforma,recebido,
+H0302,2026-07-06,2026-07-06,gasto,FSE_COMBUSTIVEL,6242,"Petrovia Combustíveis, S.A.",506804577,FS PV2026071,38.96,23,8.96,47.92,4.48,cartao_empresa,pago,gasóleo: IVA dedutível 50%
+H0303,2026-07-08,2026-07-21,gasto,FSE_ELETRICIDADE_AL,6241,"LuzViva Energia, S.A.",506488764,FT LV2026/07,31.85,6,1.91,33.76,1.91,debito_direto,pago,
+H0304,2026-07-08,2026-07-21,gasto,FSE_ELETRICIDADE_AL,6241,"LuzViva Energia, S.A.",506488764,FT LV2026/07,33.83,23,7.78,41.61,7.78,debito_direto,pago,
+H0305,2026-07-10,2026-07-10,gasto,OUTROS_DONATIVOS,6882,Igreja Comunidade Esperança - Associação,501079815,D-2026-07,450.0,0,0.0,450.0,0.0,transferencia,pago,
+H0306,2026-07-10,2026-07-11,receita,REC_AL,7212,Hóspede (consumidor final),999999990,FR 2026B/0031,862.26,6,51.74,914.0,0.0,payout_plataforma,recebido,
+H0307,2026-07-13,2026-07-14,receita,REC_AL,7212,Hóspede (consumidor final),999999990,FR 2026B/0032,931.13,6,55.87,987.0,0.0,payout_plataforma,recebido,
+H0308,2026-07-15,2026-07-20,estado,ESTADO_IRC_PPC,2411/241,Autoridade Tributária,-,1.º PPC 2026,412.36,0,0.0,412.36,0.0,pagamento_estado,pago,
+H0309,2026-07-18,2026-07-19,receita,REC_AL,7212,Hóspede (consumidor final),999999990,FR 2026B/0033,287.74,6,17.26,305.0,0.0,payout_plataforma,recebido,
+H0310,2026-07-19,2026-07-03,receita,REC_3D,7213,Consumidor final,999999990,FR 2026B/0036,81.3,23,18.7,100.0,0.0,mbway,recebido,
+H0311,2026-07-22,2026-07-23,receita,REC_AL,7212,Hóspede (consumidor final),999999990,FR 2026B/0034,1034.91,6,62.09,1097.0,0.0,payout_plataforma,recebido,
+H0312,2026-07-27,2026-07-28,receita,REC_AL,7212,Hóspede (consumidor final),999999990,FR 2026B/0035,793.4,6,47.6,841.0,0.0,payout_plataforma,recebido,
+H0313,2026-07-27,2026-07-08,receita,REC_3D,7213,"Ateliê Moldura Viva, Lda",519320816,FR 2026B/0037,56.91,23,13.09,70.0,0.0,transferencia,recebido,
+H0314,2026-07-31,2026-07-02,gasto,FSE_COMISSOES_PLATAFORMA,6228,StayNest Ireland Ltd,IE9876543ZW,SN-PT-2026-07,9.15,0,0.0,9.15,0.0,deduzido_no_payout,pago,autoliquidação IVA 23% (liquidado = dedutível)
+H0315,2026-07-31,2026-07-06,gasto,FSE_COMISSOES_PLATAFORMA,6228,StayNest Ireland Ltd,IE9876543ZW,SN-PT-2026-07,21.93,0,0.0,21.93,0.0,deduzido_no_payout,pago,autoliquidação IVA 23% (liquidado = dedutível)
+H0316,2026-07-31,2026-07-11,gasto,FSE_COMISSOES_PLATAFORMA,6228,StayNest Ireland Ltd,IE9876543ZW,SN-PT-2026-07,27.42,0,0.0,27.42,0.0,deduzido_no_payout,pago,autoliquidação IVA 23% (liquidado = dedutível)
+H0317,2026-07-31,2026-07-14,gasto,FSE_COMISSOES_PLATAFORMA,6228,StayNest Ireland Ltd,IE9876543ZW,SN-PT-2026-07,29.61,0,0.0,29.61,0.0,deduzido_no_payout,pago,autoliquidação IVA 23% (liquidado = dedutível)
+H0318,2026-07-31,2026-07-19,gasto,FSE_COMISSOES_PLATAFORMA,6228,StayNest Ireland Ltd,IE9876543ZW,SN-PT-2026-07,9.15,0,0.0,9.15,0.0,deduzido_no_payout,pago,autoliquidação IVA 23% (liquidado = dedutível)
+H0319,2026-07-31,2026-07-23,gasto,FSE_COMISSOES_PLATAFORMA,6228,StayNest Ireland Ltd,IE9876543ZW,SN-PT-2026-07,32.91,0,0.0,32.91,0.0,deduzido_no_payout,pago,autoliquidação IVA 23% (liquidado = dedutível)
+H0320,2026-07-31,2026-07-28,gasto,FSE_COMISSOES_PLATAFORMA,6228,StayNest Ireland Ltd,IE9876543ZW,SN-PT-2026-07,25.23,0,0.0,25.23,0.0,deduzido_no_payout,pago,autoliquidação IVA 23% (liquidado = dedutível)
+H0321,2026-07-31,2026-07-31,gasto,FSE_SERVICOS_BANCARIOS,6981/6812,"Banco Exemplo, S.A.",501141707,Extrato 2026-07,7.8,0,0.0,7.8,0.0,debito_conta,pago,
+H0322,2026-07-31,2026-07-31,pessoal,PESSOAL_REMUNERACOES,632x,Ricardo Alves,-,RV 2026-07 Ricardo Alves,1332.0,0,0.0,1332.0,0.0,transferencia,pago,"bruto 1200.00; sub.ref 132,00; SS trab 132.00; IRS 188.04"
+H0323,2026-07-31,,pessoal,PESSOAL_ENCARGOS,635,Segurança Social,-,TSU entidade 2026-07 Ricardo Alves,285.0,0,0.0,285.0,0.0,guia_mes_seguinte,pago,
+H0324,2026-07-31,2026-07-31,pessoal,PESSOAL_REMUNERACOES,632x,Marta Alves,-,RV 2026-07 Marta Alves,1052.0,0,0.0,1052.0,0.0,transferencia,pago,"bruto 920.00; sub.ref 132,00; SS trab 101.20; IRS 13.98"
+H0325,2026-07-31,,pessoal,PESSOAL_ENCARGOS,635,Segurança Social,-,TSU entidade 2026-07 Marta Alves,218.5,0,0.0,218.5,0.0,guia_mes_seguinte,pago,
+H0326,2026-07-31,2026-08-09,receita,REC_CONSULTORIA,7211,"Quadrante Sistemas, Lda",506978800,FT 2026A/0007,5040.0,23,1159.2,6199.2,0.0,transferencia,recebido,
+H0327,2026-08-01,2026-08-01,gasto,FSE_RENDA,6261,Helena Marques Duarte,192984160,Recibo renda 2026-08,1350.0,0,0.0,1350.0,0.0,transferencia,pago,retenção 25% IRS = 337.50; pago líquido 1012.50
+H0328,2026-08-01,2026-08-08,gasto,FSE_HONORARIOS,6224,"Contas Certas - Contabilidade, Lda",519672739,FT CC2026/08,150.0,23,34.5,184.5,34.5,transferencia,pago,
+H0329,2026-08-01,2026-08-07,gasto,FSE_RENTING_VIATURA,6261,"Rodalis Renting, S.A.",503477877,FT RR2026/08,316.26,23,72.74,389.0,0.0,debito_direto,pago,viatura ligeira passageiros: IVA não dedutível; tributação autónoma
+H0330,2026-08-02,2026-08-03,gasto,FSE_SOFTWARE_CLOUD,6228,Nimbus Cloud Ltd,IE3456789KH,INV-2026-08,23.48,0,0.0,23.48,0.0,cartao_empresa,pago,USD 25; autoliquidação
+H0331,2026-08-02,2026-08-03,receita,REC_AL,7212,Hóspede (consumidor final),999999990,FR 2026B/0038,1034.91,6,62.09,1097.0,0.0,payout_plataforma,recebido,
+H0332,2026-08-03,2026-08-15,gasto,FSE_COMUNICACAO,6262,"Ondanet Comunicações, S.A.",501778489,FT ON2026/08,38.2,23,8.79,46.99,8.79,debito_direto,pago,
+H0333,2026-08-05,2026-08-28,gasto,FSE_DESLOCACOES,6251,"AutoPass Portagens, S.A.",501362703,FT AP2026/08,12.47,23,2.87,15.34,0.0,conta_pessoal_socio,pago,portagens; reembolsado ao sócio
+H0334,2026-08-05,2026-08-06,receita,REC_AL,7212,Hóspede (consumidor final),999999990,FR 2026B/0039,345.28,6,20.72,366.0,0.0,payout_plataforma,recebido,
+H0335,2026-08-08,2026-08-21,gasto,FSE_ELETRICIDADE_AL,6241,"LuzViva Energia, S.A.",506488764,FT LV2026/08,31.85,6,1.91,33.76,1.91,debito_direto,pago,
+H0336,2026-08-08,2026-08-21,gasto,FSE_ELETRICIDADE_AL,6241,"LuzViva Energia, S.A.",506488764,FT LV2026/08,36.73,23,8.45,45.18,8.45,debito_direto,pago,
+H0337,2026-08-10,2026-08-10,gasto,FSE_COMBUSTIVEL,6242,"Petrovia Combustíveis, S.A.",506804577,FS PV2026081,56.22,23,12.93,69.15,6.47,cartao_empresa,pago,gasóleo: IVA dedutível 50%
+H0338,2026-08-10,2026-08-28,gasto,MATERIAS_3D,6231,"MercaNova Portugal, Unipessoal Lda",516714759,FT MN2026/08,62.32,23,14.33,76.65,14.33,cartao_pessoal_socio,pago,pago pelo sócio - reembolsado
+H0339,2026-08-10,2026-08-10,gasto,OUTROS_DONATIVOS,6882,Igreja Comunidade Esperança - Associação,501079815,D-2026-08,450.0,0,0.0,450.0,0.0,transferencia,pago,
+H0340,2026-08-10,2026-08-11,receita,REC_AL,7212,Hóspede (consumidor final),999999990,FR 2026B/0040,397.17,6,23.83,421.0,0.0,payout_plataforma,recebido,
+H0341,2026-08-15,2026-08-18,estado,ESTADO_IVA,2436,Autoridade Tributária,-,IVA 2.º trimestre,3415.5,0,0.0,3415.5,0.0,pagamento_estado,pago,
+H0342,2026-08-15,2026-08-16,receita,REC_AL,7212,Hóspede (consumidor final),999999990,FR 2026B/0041,241.51,6,14.49,256.0,0.0,payout_plataforma,recebido,
+H0343,2026-08-17,2026-08-18,receita,REC_AL,7212,Hóspede (consumidor final),999999990,FR 2026B/0042,862.26,6,51.74,914.0,0.0,payout_plataforma,recebido,
+H0344,2026-08-18,2026-08-18,gasto,FSE_COMBUSTIVEL,6242,"Petrovia Combustíveis, S.A.",506804577,FS PV2026080,55.16,23,12.69,67.85,6.35,cartao_empresa,pago,gasóleo: IVA dedutível 50%
+H0345,2026-08-19,2026-08-20,receita,REC_3D,7213,Consumidor final,999999990,FR 2026B/0046,56.91,23,13.09,70.0,0.0,mbway,recebido,
+H0346,2026-08-19,2026-08-10,receita,REC_3D,7213,"Ateliê Moldura Viva, Lda",519320816,FR 2026B/0047,56.91,23,13.09,70.0,0.0,transferencia,recebido,
+H0347,2026-08-22,2026-08-23,receita,REC_AL,7212,Hóspede (consumidor final),999999990,FR 2026B/0043,310.38,6,18.62,329.0,0.0,payout_plataforma,recebido,
+H0348,2026-08-27,2026-08-28,receita,REC_AL,7212,Hóspede (consumidor final),999999990,FR 2026B/0044,1034.91,6,62.09,1097.0,0.0,payout_plataforma,recebido,
+H0349,2026-08-31,2026-08-03,gasto,FSE_COMISSOES_PLATAFORMA,6228,StayNest Ireland Ltd,IE9876543ZW,SN-PT-2026-08,32.91,0,0.0,32.91,0.0,deduzido_no_payout,pago,autoliquidação IVA 23% (liquidado = dedutível)
+H0350,2026-08-31,2026-08-06,gasto,FSE_COMISSOES_PLATAFORMA,6228,StayNest Ireland Ltd,IE9876543ZW,SN-PT-2026-08,10.98,0,0.0,10.98,0.0,deduzido_no_payout,pago,autoliquidação IVA 23% (liquidado = dedutível)
+H0351,2026-08-31,2026-08-11,gasto,FSE_COMISSOES_PLATAFORMA,6228,StayNest Ireland Ltd,IE9876543ZW,SN-PT-2026-08,12.63,0,0.0,12.63,0.0,deduzido_no_payout,pago,autoliquidação IVA 23% (liquidado = dedutível)
+H0352,2026-08-31,2026-08-16,gasto,FSE_COMISSOES_PLATAFORMA,6228,StayNest Ireland Ltd,IE9876543ZW,SN-PT-2026-08,7.68,0,0.0,7.68,0.0,deduzido_no_payout,pago,autoliquidação IVA 23% (liquidado = dedutível)
+H0353,2026-08-31,2026-08-18,gasto,FSE_COMISSOES_PLATAFORMA,6228,StayNest Ireland Ltd,IE9876543ZW,SN-PT-2026-08,27.42,0,0.0,27.42,0.0,deduzido_no_payout,pago,autoliquidação IVA 23% (liquidado = dedutível)
+H0354,2026-08-31,2026-08-23,gasto,FSE_COMISSOES_PLATAFORMA,6228,StayNest Ireland Ltd,IE9876543ZW,SN-PT-2026-08,9.87,0,0.0,9.87,0.0,deduzido_no_payout,pago,autoliquidação IVA 23% (liquidado = dedutível)
+H0355,2026-08-31,2026-08-28,gasto,FSE_COMISSOES_PLATAFORMA,6228,StayNest Ireland Ltd,IE9876543ZW,SN-PT-2026-08,32.91,0,0.0,32.91,0.0,deduzido_no_payout,pago,autoliquidação IVA 23% (liquidado = dedutível)
+H0356,2026-08-31,2026-08-31,gasto,FSE_COMISSOES_PLATAFORMA,6228,StayNest Ireland Ltd,IE9876543ZW,SN-PT-2026-08,25.23,0,0.0,25.23,0.0,deduzido_no_payout,pago,autoliquidação IVA 23% (liquidado = dedutível)
+H0357,2026-08-31,2026-08-31,gasto,FSE_SERVICOS_BANCARIOS,6981/6812,"Banco Exemplo, S.A.",501141707,Extrato 2026-08,7.8,0,0.0,7.8,0.0,debito_conta,pago,
+H0358,2026-08-31,2026-08-31,pessoal,PESSOAL_REMUNERACOES,632x,Ricardo Alves,-,RV 2026-08 Ricardo Alves,1332.0,0,0.0,1332.0,0.0,transferencia,pago,"bruto 1200.00; sub.ref 132,00; SS trab 132.00; IRS 188.04"
+H0359,2026-08-31,,pessoal,PESSOAL_ENCARGOS,635,Segurança Social,-,TSU entidade 2026-08 Ricardo Alves,285.0,0,0.0,285.0,0.0,guia_mes_seguinte,pago,
+H0360,2026-08-31,2026-08-31,pessoal,PESSOAL_REMUNERACOES,632x,Marta Alves,-,RV 2026-08 Marta Alves,1052.0,0,0.0,1052.0,0.0,transferencia,pago,"bruto 920.00; sub.ref 132,00; SS trab 101.20; IRS 13.98"
+H0361,2026-08-31,,pessoal,PESSOAL_ENCARGOS,635,Segurança Social,-,TSU entidade 2026-08 Marta Alves,218.5,0,0.0,218.5,0.0,guia_mes_seguinte,pago,
+H0362,2026-08-31,,receita,REC_CONSULTORIA,7211,"Quadrante Sistemas, Lda",506978800,FT 2026A/0008,5300.0,23,1219.0,6519.0,0.0,transferencia,em_aberto,
+H0363,2026-08-31,2026-08-31,receita,REC_AL,7212,Hóspede (consumidor final),999999990,FR 2026B/0045,793.4,6,47.6,841.0,0.0,payout_plataforma,recebido,
