@@ -19,7 +19,9 @@ from app.models import (
     OpenItem,
     Period,
     PeriodCloseBody,
+    ScanImport,
 )
+from app.pending import credit_applications_for_month, resolved_after_close
 from app.money import ZERO, money_equal, to_money
 from app.posting import excluded_from_linking, note_value
 from app.statements import import_statement_text
@@ -435,6 +437,8 @@ def period_checklist(month: str, session: Session = Depends(get_session)) -> dic
         "blockers": blockers,
         "blockers_by_kind": blockers_by_kind,
         "accepted_pending_items": [_accepted_payload(item) for item in accepted],
+        "resolved_after_close": resolved_after_close(session, month),
+        "credit_applications": credit_applications_for_month(session, month),
         "invoice_open_balances": partial_invoice_balances(session),
         "rule": (
             "no bank line without a supporting document; "
@@ -544,4 +548,30 @@ def monthly_report(month: str, session: Session = Depends(get_session)) -> dict:
         "month": month,
         "status": period.status if period is not None else "missing",
         "accepted_pending_items": [_accepted_payload(item) for item in accepted],
+        "resolved_after_close": resolved_after_close(session, month),
+        "credit_applications": credit_applications_for_month(session, month),
     }
+
+
+@app.post("/scans")
+def import_scan(payload: ScanImport, session: Session = Depends(get_session)) -> dict:
+    """Store one scanned PDF. An optional note is context; the sender is not."""
+    from app.extract import list_categories
+    from app.process_one import process_scan_bytes
+
+    pdf_path = Path(payload.path)
+    if not pdf_path.is_absolute():
+        pdf_path = ROOT / pdf_path
+    if not pdf_path.exists() or pdf_path.suffix.lower() != ".pdf":
+        raise HTTPException(status_code=404, detail="PDF file not found")
+    categories = list_categories(session)
+    if not categories:
+        raise HTTPException(status_code=409, detail="Category table is empty")
+    results = process_scan_bytes(
+        session,
+        pdf_path.read_bytes(),
+        pdf_path.name,
+        payload.note or "",
+        categories,
+    )
+    return {"results": results}

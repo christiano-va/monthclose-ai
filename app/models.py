@@ -105,6 +105,44 @@ class OpenItem(SQLModel, table=True):
     approval_reason: Optional[str] = None
     approved_by: Optional[str] = None
     approved_at: Optional[datetime] = None
+    resolved_at: Optional[datetime] = None
+    resolved_document_id: Optional[int] = Field(default=None, foreign_key="document.id")
+
+
+class PostCloseResolution(SQLModel, table=True):
+    """A late document or explanation that settled an item after the month was closed.
+
+    The period stays closed. This row is what the monthly report shows.
+    """
+
+    __tablename__ = "post_close_resolution"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    period: str = Field(index=True)
+    open_item_id: Optional[int] = Field(default=None, foreign_key="openitem.id")
+    bank_line_id: Optional[int] = Field(default=None, index=True)
+    document_id: Optional[int] = Field(default=None, foreign_key="document.id")
+    email_source_id: Optional[str] = None
+    resolved_at: datetime
+    summary: str
+
+
+class CreditApplication(SQLModel, table=True):
+    """A credit note deducted from a later invoice of the same issuer."""
+
+    __tablename__ = "credit_application"
+    __table_args__ = (
+        UniqueConstraint("credit_document_id", name="uq_credit_application_credit"),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    credit_document_id: int = Field(foreign_key="document.id", index=True)
+    invoice_document_id: int = Field(foreign_key="document.id", index=True)
+    invoice_total: Decimal = Field(sa_column=Column(Numeric(14, 2), nullable=False))
+    credit_amount: Decimal = Field(sa_column=Column(Numeric(14, 2), nullable=False))
+    amount_payable: Decimal = Field(sa_column=Column(Numeric(14, 2), nullable=False))
+    applied_at: datetime
+    explanation: str
 
 
 class DocumentCreate(SQLModel):
@@ -159,3 +197,8 @@ class PeriodCloseBody(SQLModel):
     approvals: List[ApprovalDecision] = Field(default_factory=list)
     approved_by: Optional[str] = None
     timestamp: Optional[datetime] = None
+
+
+class ScanImport(SQLModel):
+    path: str
+    note: Optional[str] = None

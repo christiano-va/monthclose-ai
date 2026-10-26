@@ -27,6 +27,8 @@ METHODS = (
     "settlement",
     "reimbursement",
     "evidence",
+    "late_document",
+    "explanation",
 )
 
 

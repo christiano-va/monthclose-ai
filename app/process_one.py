@@ -963,6 +963,10 @@ def _sync_credit_item(session, credit, original, reduction, applies_next):
         if item.notes and marker in item.notes:
             existing = item
             break
+    if note_value(credit.notes, "applied_to") or (
+        existing is not None and note_value(existing.notes, "applied_to")
+    ):
+        return
     if not applies_next:
         if existing is not None:
             existing.status = "done"
@@ -1457,6 +1461,9 @@ def finalize_documents(session):
     bind_credit_notes(session)
     connect_tax_proofs(session)
     ensure_owner_tasks(session)
+    from app.pending import apply_open_credits
+
+    apply_open_credits(session)
     return marked
 
 
@@ -2007,6 +2014,21 @@ def process_eml(session, message, eml_path, categories, reprocess=False):
         item = process_email_without_pdf(session, message, path, reprocess=reprocess)
         logger.info("%s %s %s", item["status"], path.name, item.get("reason") or "")
         finalize_documents(session)
+        from app.pending import attach_explanation
+
+        decision = attach_explanation(
+            session, item, message, email_source_id(message, path), categories
+        )
+        if decision.get("outcome") in ("linked", "confirm") and item.get("open_item_id"):
+            request = session.get(OpenItem, item.get("open_item_id"))
+            if request is not None and request.kind == "invoice_to_request":
+                request.status = "done"
+                request.justification = (
+                    "The email explains a bank line, so it is not a separate invoice request."
+                )
+                session.add(request)
+                session.commit()
+                item["open_item_id"] = decision.get("confirm_task_id")
         return [item]
 
     results = []
@@ -2037,6 +2059,47 @@ def process_eml(session, message, eml_path, categories, reprocess=False):
             results.append(item)
     finalize_documents(session)
     _patch_duplicate_results(session, results)
+    from app.pending import attach_late_results
+
+    attach_late_results(session, results, message)
+    return results
+
+
+def process_scan_bytes(session, data, filename, note, categories):
+    # type: (Session, bytes, str, str, list) -> List[Dict[str, Any]]
+    """Process one PDF the way a scan upload does: no sender and no email body.
+
+    `note` is optional text the owner typed with the scan. It is the only context.
+    """
+    digest = hashlib.sha256(data).hexdigest()
+    message = MailMessage(
+        sender="",
+        subject="",
+        date=None,
+        body=note or "",
+        attachments=[],
+        source_path=filename,
+        message_id="scan:%s" % digest,
+    )
+    attachment = Attachment(
+        filename=filename or "scan.pdf",
+        content_type="application/pdf",
+        data=data,
+    )
+    results = process_attachment(
+        session,
+        message,
+        attachment,
+        Path(filename or "scan.pdf"),
+        categories,
+    )
+    for item in results:
+        item["email"] = "scan:%s" % (filename or "scan.pdf")
+    finalize_documents(session)
+    _patch_duplicate_results(session, results)
+    from app.pending import attach_late_results
+
+    attach_late_results(session, results, message)
     return results
 
 

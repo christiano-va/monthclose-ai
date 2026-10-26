@@ -50,7 +50,13 @@ LIABILITY_ACCOUNT = {
     "ESTADO_IVA": ACCOUNT_VAT,
 }
 
-OWNER_TASK_KINDS = ("missing_document", "missing_sales_invoice", "invoice_to_request")
+OWNER_TASK_KINDS = (
+    "missing_document",
+    "missing_sales_invoice",
+    "invoice_to_request",
+    "confirm_late_document",
+    "confirm_explanation",
+)
 
 _INVOICE_RE = re.compile(
     r"\b((?:FT|FR|FS|NC|ND|RG)[\s./-]*[A-Z0-9]*\d[A-Z0-9/\-]*)",

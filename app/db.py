@@ -35,6 +35,8 @@ _COLUMN_UPGRADES = {
         "approval_reason": "VARCHAR",
         "approved_by": "VARCHAR",
         "approved_at": "DATETIME",
+        "resolved_at": "DATETIME",
+        "resolved_document_id": "INTEGER",
     },
 }
 
