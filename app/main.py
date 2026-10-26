@@ -24,6 +24,7 @@ from app.models import (
 from app.pending import credit_applications_for_month, resolved_after_close
 from app.money import ZERO, money_equal, to_money
 from app.posting import excluded_from_linking, note_value
+from app.phone import router as phone_router
 from app.statements import import_statement_text
 
 # Open tasks that block the month unless the owner accepts them one by one.
@@ -32,6 +33,7 @@ BLOCKING_KINDS = ("missing_document", "missing_sales_invoice")
 MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
 
 app = FastAPI(title="MonthClose AI", version="0.1.0")
+app.include_router(phone_router)
 
 
 @app.on_event("startup")

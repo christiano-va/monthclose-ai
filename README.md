@@ -20,7 +20,9 @@ Create a `.env` file in the project root. Do not commit it. It needs:
 
 - `XAI_API_KEY` — key for the xAI API
 - `XAI_MODEL` — model name sent to that API
+- `XAI_VISION_MODEL` — vision model for phone photos (defaults to `grok-4.7` when unset)
 - `COMPANY_NIF` — 9-digit tax id of the company that issues the sales invoices
+- `SCAN_CODE` — access code required by the phone scan page
 
 ## Run the API
 
@@ -30,6 +32,26 @@ uvicorn app.main:app --reload
 ```
 
 Interactive docs are at `http://127.0.0.1:8000/docs`.
+
+## Phone scan
+
+Start the API so a phone on the same network can open it:
+
+```bash
+source venv/bin/activate
+uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+On the phone:
+
+1. Join the same Wi-Fi as the Mac, or join the Mac's hotspot.
+2. On the Mac, run `ipconfig getifaddr en0` and read the address it prints.
+3. On the phone, open `http://IP:8000/scan` (replace `IP` with that address).
+4. Enter the access code from `SCAN_CODE` in `.env`, take a photo or choose a PDF, add a note if you want, and send it.
+
+The page lists the last scans at `http://IP:8000/scan/recent`. A photo is read by the vision model. A PDF is read as text. Both then go through the same validation, classification and pending-item match as an email attachment. The same file is not sent to the model again: replies are cached by the file hash.
+
+Uploads are stored under `data/uploads/` and are not committed. A restaurant, fuel, parking or stationery receipt is checked in code. If the company NIF is not printed, the VAT is not deductible and the NIF is left blank. Fuel and restaurant VAT stay marked to review, because the processing code does not apply a special rate. A cash payment or a personal card is status `awaiting bank line` and an owner task, not an error.
 
 ## Commands
 
@@ -107,6 +129,9 @@ When an invoice arrives from an issuer that still has an unapplied credit note, 
 | `GET` | `/bank-lines?period=YYYY-MM&status=unsupported` | List bank lines |
 | `POST` | `/links` | Link a document to a bank line |
 | `POST` | `/scans` | Process one scanned PDF. Body: `{"path": "....pdf", "note": ""}` |
+| `GET` | `/scan` | Phone page to photograph a receipt or choose a PDF |
+| `POST` | `/scan/upload` | Multipart upload: `file`, optional `note`, `code` |
+| `GET` | `/scan/recent` | Last 20 phone scans and their status |
 | `GET` | `/periods/{month}/checklist` | Close checklist, accepted pendings, resolutions after close, credit applications |
 | `POST` | `/periods/{month}/close` | Close the month. With open pendings, send `approvals`, `approved_by` and `timestamp` |
 | `GET` | `/reports/{month}` | Month status, `accepted_pending_items`, `resolved_after_close`, `credit_applications` |

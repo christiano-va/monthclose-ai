@@ -18,3 +18,9 @@ def company_nif():
     if len(digits) != 9:
         raise RuntimeError("COMPANY_NIF must be set in .env to a 9-digit NIF")
     return digits
+
+
+def scan_code():
+    # type: () -> str
+    """Shared access code for the phone scan page. Empty when unset."""
+    return (os.getenv("SCAN_CODE") or "").strip()

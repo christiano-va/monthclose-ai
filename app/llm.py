@@ -1,7 +1,13 @@
 """xAI chat completions that must return JSON matching a schema."""
+import base64
+import hashlib
 import json
+import logging
 import os
-from typing import Any, Dict
+from contextlib import contextmanager
+from contextvars import ContextVar
+from pathlib import Path
+from typing import Any, Dict, Optional
 
 from dotenv import load_dotenv
 from openai import OpenAI
@@ -16,6 +22,9 @@ class LLMError(RuntimeError):
 
 
 _LLM_CALLS = 0
+logger = logging.getLogger("app.llm")
+CACHE_DIR = Path(__file__).resolve().parent.parent / "data" / "cache" / "llm"
+_FILE_DIGEST = ContextVar("llm_file_digest", default="")
 
 
 def reset_llm_calls():
@@ -43,6 +52,65 @@ def _model_name():
     if not model:
         raise LLMError("XAI_MODEL is not set")
     return model
+
+
+def vision_model_name():
+    # type: () -> str
+    return os.getenv("XAI_VISION_MODEL") or "grok-4.7"
+
+
+@contextmanager
+def file_cache(data):
+    # type: (bytes) -> Any
+    """Remember LLM replies for these exact bytes. A repeat does not call the API."""
+    digest = hashlib.sha256(data).hexdigest()
+    if _FILE_DIGEST.get() == digest:
+        yield digest
+        return
+    token = _FILE_DIGEST.set(digest)
+    try:
+        yield digest
+    finally:
+        _FILE_DIGEST.reset(token)
+
+
+def _cache_file(model, prompt, schema, image):
+    # type: (str, str, Dict[str, Any], Optional[bytes]) -> Optional[Path]
+    digest = _FILE_DIGEST.get()
+    if not digest:
+        return None
+    image_key = hashlib.sha256(image).hexdigest() if image else ""
+    material = "\n".join(
+        [model, prompt, image_key, json.dumps(schema, sort_keys=True, ensure_ascii=False)]
+    )
+    key = hashlib.sha256(material.encode("utf-8")).hexdigest()
+    return CACHE_DIR / digest / (key + ".json")
+
+
+def _read_cache(path, schema):
+    # type: (Optional[Path], Dict[str, Any]) -> Optional[Dict[str, Any]]
+    if path is None or not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    try:
+        validate_json(data, schema)
+    except LLMError:
+        return None
+    logger.info("llm cache hit")
+    return data
+
+
+def _write_cache(path, data):
+    # type: (Optional[Path], Dict[str, Any]) -> None
+    if path is None:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
 
 
 def _strip_fences(text):
@@ -123,23 +191,42 @@ def validate_json(data, schema, path="$"):
         raise LLMError("%s: %s above maximum %s" % (path, data, maximum))
 
 
-def llm_json(prompt, schema):
-    # type: (str, Dict[str, Any]) -> Dict[str, Any]
-    """Call the xAI model and return JSON that matches `schema`, or raise."""
-    client = _client()
-    model = _model_name()
+def llm_json(prompt, schema, image=None, image_mime="image/jpeg"):
+    # type: (str, Dict[str, Any], Optional[bytes], str) -> Dict[str, Any]
+    """Call the xAI model and return JSON that matches `schema`, or raise.
+
+    When a file cache is active, the same file and the same prompt are read
+    from disk instead of calling the API again.
+    """
+    model = vision_model_name() if image else _model_name()
     system = (
         "You extract structured data. Reply with JSON only, matching the "
         "given schema. Use ISO dates YYYY-MM-DD. Express money as strings "
         "with two decimal places (example: \"184.50\"), never as floats."
     )
     user = prompt + "\n\nJSON schema:\n" + json.dumps(schema, ensure_ascii=False, indent=2)
+    cached = _read_cache(_cache_file(model, user, schema, image), schema)
+    if cached is not None:
+        return cached
 
+    if image:
+        encoded = base64.b64encode(image).decode("ascii")
+        user_content = [
+            {"type": "text", "text": user},
+            {
+                "type": "image_url",
+                "image_url": {"url": "data:%s;base64,%s" % (image_mime, encoded)},
+            },
+        ]
+    else:
+        user_content = user
+
+    client = _client()
     kwargs = {
         "model": model,
         "messages": [
             {"role": "system", "content": system},
-            {"role": "user", "content": user},
+            {"role": "user", "content": user_content},
         ],
         "temperature": 0,
     }
@@ -175,4 +262,5 @@ def llm_json(prompt, schema):
     if not isinstance(data, dict):
         raise LLMError("top-level JSON must be an object")
     validate_json(data, schema)
+    _write_cache(_cache_file(model, user, schema, image), data)
     return data

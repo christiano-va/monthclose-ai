@@ -185,24 +185,14 @@ def _category_block(categories):
     return "\n".join(lines)
 
 
-def extract_pdf_document(pdf_bytes, message, categories, text=None):
-    # type: (bytes, MailMessage, List[Category], Optional[str]) -> Dict[str, Any]
-    """Extract document fields. Category is chosen later, not in this call."""
-    if text is None:
-        text = pdf_text(pdf_bytes)
-    if not text:
-        raise RuntimeError("PDF has no extractable text")
-    # `categories` is accepted so callers can pass the table; classification uses it.
-    if categories is None:
-        categories = []
-
+def _extraction_lines(message, opening):
+    # type: (MailMessage, str) -> List[str]
     sender_domain = ""
     if "@" in (message.sender or ""):
         sender_domain = message.sender.split("@")[-1].rstrip(">")
-
     our_nif = company_nif()
-    prompt_parts = [
-        "Extract the accounting document from this PDF.",
+    return [
+        opening,
         "The company closing the books is Nortavia Digital, NIF %s." % our_nif,
         "Ignore the vertical watermark (one letter per line). Read the real lines.",
         "issuer_name and issuer_nif are who ISSUED the document. nif is the same value as issuer_nif.",
@@ -214,8 +204,8 @@ def extract_pdf_document(pdf_bytes, message, categories, text=None):
         "payee_name and payee_nif are who receives the money on a bank payment proof or a payment notice. On a payment proof the issuer is the bank and the payee is the entity paid (Segurança Social, Autoridade Tributária), not the account holder. On an ordinary invoice payee_name and payee_nif are null.",
         "NIF 999999990 is valid. Use it when the customer is a final consumer (consumidor final).",
         "document_kind is exactly one of: invoice, receipt, payslip, tax_guide, payment_proof, payment_notice, bank_statement, payout_report, other.",
-        "Use invoice for faturas, faturas-recibo, notas de crédito and notas de débito (including VAT-exempt bank fee notes).",
-        "Use receipt for payment receipts (recibo / RG), rent receipts and donation receipts.",
+        "Use invoice for faturas (FT), faturas-recibo, notas de crédito and notas de débito (including VAT-exempt bank fee notes).",
+        "Use receipt for a simplified invoice (fatura simplificada, series FS or FR), a till slip (talão), a payment receipt (recibo / RG), a rent receipt and a donation receipt.",
         "Use payslip for recibo de vencimento. Use tax_guide for a payment guide (guia) from Segurança Social or Autoridade Tributária.",
         "Use payment_proof for a bank comprovativo de pagamento. Use payment_notice for an aviso de pagamento.",
         "Use bank_statement for an extrato de conta. Use payout_report for a platform payout report. Use other for an expense reimbursement note.",
@@ -259,11 +249,71 @@ def extract_pdf_document(pdf_bytes, message, categories, text=None):
         "Sender domain: %s" % sender_domain,
         "Email body:",
         message.body or "(empty)",
-        "",
-        "PDF text:",
-        text[:12000],
     ]
+
+
+def extract_pdf_document(pdf_bytes, message, categories, text=None):
+    # type: (bytes, MailMessage, List[Category], Optional[str]) -> Dict[str, Any]
+    """Extract document fields. Category is chosen later, not in this call."""
+    if text is None:
+        text = pdf_text(pdf_bytes)
+    if not text:
+        raise RuntimeError("PDF has no extractable text")
+    # `categories` is accepted so callers can pass the table; classification uses it.
+    if categories is None:
+        categories = []
+    prompt_parts = _extraction_lines(message, "Extract the accounting document from this PDF.")
+    prompt_parts.extend(["", "PDF text:", text[:12000]])
     return llm_json("\n".join(prompt_parts), EXTRACT_SCHEMA)
+
+
+def extraction_text(extracted):
+    # type: (Dict[str, Any]) -> str
+    """Plain text the rest of the pipeline can scan after a photo extraction."""
+    parts = []  # type: List[str]
+    for key in (
+        "document_type",
+        "document_kind",
+        "issuer_name",
+        "issuer_nif",
+        "recipient_name",
+        "recipient_nif",
+        "payee_name",
+        "document_number",
+        "description",
+        "date",
+    ):
+        value = extracted.get(key)
+        if value:
+            parts.append("%s: %s" % (key, value))
+    for line in extracted.get("lines") or []:
+        if isinstance(line, dict) and line.get("description"):
+            parts.append(str(line.get("description")))
+    return "\n".join(parts)
+
+
+def extract_image_document(image_bytes, message, categories, mime="image/jpeg"):
+    # type: (bytes, MailMessage, List[Category], str) -> Dict[str, Any]
+    """Extract the same schema from a photo. A NIF that is not printed stays null."""
+    if categories is None:
+        categories = []
+    prompt_parts = _extraction_lines(
+        message, "Extract the accounting document from this photograph."
+    )
+    prompt_parts.extend(
+        [
+            "The image is the only source of the figures and the tax ids.",
+            "If a NIF is not printed on the page, leave that NIF field null.",
+            "Do not copy the company NIF from these instructions onto the document.",
+            "description includes the payment method as printed, such as numerario, dinheiro, multibanco or cartao.",
+        ]
+    )
+    return llm_json(
+        "\n".join(prompt_parts),
+        EXTRACT_SCHEMA,
+        image=image_bytes,
+        image_mime=mime,
+    )
 
 
 CLASSIFY_SCHEMA = {
@@ -311,6 +361,9 @@ def classify_unknown_issuer(extracted, categories, pdf_text_value, message):
             "Office furniture and equipment used for more than a year (a chair, a computer) is EQUIPAMENTO_ADMIN. A 3D printer is EQUIPAMENTO_3D.",
             "A tax guide or a tax payment proof settles a liability, not a cost. IRS withholding (retenções na fonte) is ESTADO_RETENCOES_IRS. Social security contributions are ESTADO_SEGURANCA_SOCIAL. IRC and VAT keep ESTADO_IRC, ESTADO_IRC_PPC or ESTADO_IVA.",
             "A reimbursement of expenses to the manager or a partner is SOCIO_CONTA_CORRENTE, not an expense and not SUSPECT.",
+            "Never answer SUSPECT or SETTLEMENT. Those are not bookkeeping categories.",
+            "Fraud is decided in code from an IBAN change, a new IBAN, urgency, or a short payment deadline.",
+            "A fictional footer, an unknown NIF, or low confidence is not fraud and is not a category.",
             "Do not answer UNMAPPED for an IRS withholding guide.",
             "confidence is 0-1 for this classification. justification is one line.",
             "",
@@ -327,7 +380,9 @@ def classify_unknown_issuer(extracted, categories, pdf_text_value, message):
             "email sender: %s" % (message.sender or ""),
             "",
             "Allowed categories (code | snc | description):",
-            _category_block(categories),
+            _category_block(
+                [row for row in categories if row.code not in ("SUSPECT", "SETTLEMENT")]
+            ),
             "",
             "PDF text:",
             (pdf_text_value or "")[:6000],

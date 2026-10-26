@@ -145,6 +145,20 @@ class CreditApplication(SQLModel, table=True):
     explanation: str
 
 
+class PhoneScan(SQLModel, table=True):
+    """One photo or PDF sent from the phone page."""
+
+    __tablename__ = "phone_scan"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    created_at: datetime
+    filename: str
+    file_hash: str = Field(index=True)
+    status: str
+    document_id: Optional[int] = Field(default=None, foreign_key="document.id")
+    payload: str
+
+
 class DocumentCreate(SQLModel):
     source_id: Optional[str] = None
     document_date: date

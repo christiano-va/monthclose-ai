@@ -84,9 +84,32 @@ logger = logging.getLogger("app.process")
 # Human review when the AI confidence is below this. History reuse is 0.95.
 LOW_CONFIDENCE_THRESHOLD = 0.8
 
+# The model sometimes answers SUSPECT when it has no purchase category, or because
+# the page says the document is fictional. That is not one of the fraud flags.
+SUSPECT_NOT_APPLIED = (
+    "SUSPECT not applied: only an IBAN change, a new IBAN, urgency language, "
+    "or a short payment deadline. A fictional footer, an unknown NIF, or confidence alone does not."
+)
+
+_SIMPLIFIED_TYPES = (
+    "fatura_simplificada",
+    "factura_simplificada",
+    "simplified_invoice",
+    "fs",
+    "fr",
+    "talao",
+    "talao_de_caixa",
+    "talao_de_restaurante",
+    "till_slip",
+)
+
+_SERIES_RE = re.compile(r"^(FS|FR)(?:\s|$|[./-])", re.IGNORECASE)
+_FOLD = str.maketrans("áàâãéêíóôõúçÁÀÂÃÉÊÍÓÔÕÚÇ", "aaaaeeioooucaaaaeeiooouc")
+
 _HOURS_RE = re.compile(r"(\d{1,4})\s+horas", re.IGNORECASE)
 _BOOKING_RE = re.compile(r"\b([A-Z]{2,}\d[A-Z0-9]{2,})\b")
 ATTACH_DIR = ROOT / "data" / "attachments"
+UPLOAD_DIR = ROOT / "data" / "uploads"
 
 
 def _get_or_create_period(session, month):
@@ -184,6 +207,8 @@ def _review_reason(validation, confidence, flags, category, raw_code):
         chunks.append("low confidence: %.2f" % confidence)
     if flags:
         chunks.append("risk_flag: " + "; ".join(flags))
+    if category is not None and category.code == CATEGORY_SUSPECT and not flags:
+        chunks.append(SUSPECT_NOT_APPLIED)
     if category is None:
         if raw_code:
             chunks.append("unknown category: %s" % raw_code)
@@ -192,6 +217,24 @@ def _review_reason(validation, confidence, flags, category, raw_code):
     if not chunks:
         return "validated", ""
     return "review", "; ".join(chunks)
+
+
+def _ensure_reason(status, reason, category, flags):
+    # type: (str, str, Optional[Any], List[str]) -> Tuple[str, str]
+    """SUSPECT and review always name the rule that triggered them."""
+    code = category.code if category is not None else ""
+    text = (reason or "").strip()
+    if code == CATEGORY_SUSPECT:
+        if not text:
+            if flags:
+                text = "SUSPECT: " + ", ".join(flags)
+            else:
+                text = SUSPECT_NOT_APPLIED
+        if status == "validated":
+            status = "review"
+    if status in ("review", "error") and not text:
+        text = "review required: the triggering rule was not recorded"
+    return status, text
 
 
 def _stored_reason(notes, status):
@@ -602,13 +645,14 @@ def _draft_invoice_email(counterparty, hours, period):
     return "To: accountant\nSubject: %s\n\n%s" % (subject, body)
 
 
-def _save_attachment(data, original_filename):
-    # type: (bytes, str) -> Path
-    ATTACH_DIR.mkdir(parents=True, exist_ok=True)
+def _save_attachment(data, original_filename, directory=None):
+    # type: (bytes, str, Optional[Path]) -> Path
+    folder = directory or ATTACH_DIR
+    folder.mkdir(parents=True, exist_ok=True)
     digest = hashlib.sha256(data).hexdigest()[:16]
     cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", original_filename or "attachment.pdf")
     cleaned = cleaned.strip("._") or "attachment.pdf"
-    path = ATTACH_DIR / ("%s_%s" % (digest, cleaned))
+    path = folder / ("%s_%s" % (digest, cleaned))
     if not path.exists():
         path.write_bytes(data)
     return path
@@ -638,14 +682,71 @@ def _category_by_code(session, code):
     return session.exec(select(Category).where(Category.code == code)).first()
 
 
+def _fold_text(value):
+    # type: (str) -> str
+    return (value or "").lower().translate(_FOLD)
+
+
+def _is_fatura_recibo(extracted, text):
+    # type: (Dict[str, Any], str) -> bool
+    """A titled fatura-recibo is the invoice itself, including a sales series FR."""
+    blob = _fold_text(
+        " ".join(
+            [
+                str(extracted.get("document_type") or ""),
+                str(extracted.get("document_kind") or ""),
+                text or "",
+            ]
+        )
+    )
+    return "fatura-recibo" in blob or "fatura recibo" in blob or "fatura_recibo" in blob
+
+
+def _is_simplified_or_till(extracted, text):
+    # type: (Dict[str, Any], str) -> bool
+    """FS, a till-slip FR, fatura simplificada, and talões are receipts."""
+    if _is_fatura_recibo(extracted, text):
+        return False
+    dtype = (
+        str(extracted.get("document_type") or "")
+        .strip()
+        .lower()
+        .replace(" ", "_")
+        .replace("-", "_")
+    )
+    if dtype in _SIMPLIFIED_TYPES:
+        return True
+    number = str(extracted.get("document_number") or "").strip()
+    if _SERIES_RE.match(number):
+        return True
+    blob = _fold_text(
+        " ".join(
+            [
+                str(extracted.get("document_type") or ""),
+                str(extracted.get("description") or ""),
+                text or "",
+            ]
+        )
+    )
+    markers = (
+        "fatura simplificada",
+        "factura simplificada",
+        "talao",
+        "till slip",
+    )
+    return any(marker in blob for marker in markers)
+
+
 def _correct_kind(kind, extracted, text):
     # type: (str, Dict[str, Any], str) -> str
-    """Keep a fatura-recibo as the invoice, not as a settlement receipt."""
-    head = (text or "")[:600].upper()
-    if "FATURA-RECIBO" in head or "FATURA RECIBO" in head:
+    """Keep a fatura-recibo as the invoice. A simplified invoice or till slip is a receipt."""
+    if _is_fatura_recibo(extracted, text):
         extracted["settles_invoice"] = False
         extracted["referenced_invoice"] = None
         return "invoice"
+    if _is_simplified_or_till(extracted, text):
+        return "receipt"
+    head = (text or "")[:600].upper()
     if "RECIBO DE VENCIMENTO" in head:
         return "payslip"
     if "AVISO DE PAGAMENTO" in head:
@@ -1498,10 +1599,43 @@ def ensure_owner_tasks(session):
 
 
 def process_attachment(
-    session, message, attachment, eml_path, categories, reprocess=False
+    session,
+    message,
+    attachment,
+    eml_path,
+    categories,
+    reprocess=False,
+    prepared=None,
+    store_dir=None,
 ):
-    # type: (Session, MailMessage, Attachment, Path, list, bool) -> List[Dict[str, Any]]
-    """Extract, classify, validate, and store one PDF. May store one row per line group."""
+    # type: (Session, MailMessage, Attachment, Path, list, bool, Optional[tuple], Optional[Path]) -> List[Dict[str, Any]]
+    """Extract, classify, validate, and store one PDF or a prepared photo."""
+    from app.llm import file_cache
+
+    with file_cache(attachment.data):
+        return _run_process_attachment(
+            session,
+            message,
+            attachment,
+            eml_path,
+            categories,
+            reprocess,
+            prepared,
+            store_dir,
+        )
+
+
+def _run_process_attachment(
+    session,
+    message,
+    attachment,
+    eml_path,
+    categories,
+    reprocess=False,
+    prepared=None,
+    store_dir=None,
+):
+    # type: (Session, MailMessage, Attachment, Path, list, bool, Optional[tuple], Optional[Path]) -> List[Dict[str, Any]]
     path = Path(eml_path)
     filename = attachment.filename or "attachment.pdf"
     source_id = attachment_source_id(message, attachment, path)
@@ -1509,8 +1643,11 @@ def process_attachment(
     if existing is not None and not reprocess:
         return [_from_existing(existing, path.name, filename)]
 
-    text = pdf_text(attachment.data)
-    extracted = extract_pdf_document(attachment.data, message, categories, text=text)
+    if prepared is None:
+        text = pdf_text(attachment.data)
+        extracted = extract_pdf_document(attachment.data, message, categories, text=text)
+    else:
+        text, extracted = prepared
     kind = normalize_document_kind(
         extracted.get("document_kind") or extracted.get("document_type")
     )
@@ -1670,7 +1807,7 @@ def process_attachment(
                 }
             )
 
-    saved = _save_attachment(attachment.data, filename)
+    saved = _save_attachment(attachment.data, filename, store_dir)
     period_month = doc_date.strftime("%Y-%m")
     _get_or_create_period(session, period_month)
     ensure_special_categories(session)
@@ -1697,6 +1834,7 @@ def process_attachment(
         old = _snapshot(session, current) if current is not None else None
         tax_payment = False
 
+        rejected_suspect = False
         if suspect:
             category = suspect_category
             raw_code = CATEGORY_SUSPECT
@@ -1760,6 +1898,14 @@ def process_attachment(
                 )
                 category = None
                 cat_source = "rule"
+            # SUSPECT from the classifier is not a fraud decision. Fraud flags
+            # are applied earlier and are the only path that keeps this category.
+            if category is not None and category.code == CATEGORY_SUSPECT and not suspect:
+                rejected_suspect = True
+                category = None
+                raw_code = ""
+                cat_source = "rule"
+                cat_justification = SUSPECT_NOT_APPLIED
             tax_payment = is_tax_or_social(
                 kind, "\n".join([text or "", line_text]), counterparty_name
             )
@@ -1808,6 +1954,13 @@ def process_attachment(
         status, reason = _review_reason(
             validation, decision_confidence, blocking_flags, category, raw_code
         )
+        if rejected_suspect and SUSPECT_NOT_APPLIED not in (reason or ""):
+            reason = (reason + "; " + SUSPECT_NOT_APPLIED).strip("; ")
+            if status == "validated":
+                status = "review"
+        vat_note = validation.get("vat_rates_note") or ""
+        if vat_note and vat_note not in (reason or ""):
+            reason = (reason + "; " + vat_note).strip("; ")
         if settles and kind != "payout_report" and not referenced:
             status = "review"
             reason = (reason + "; referenced invoice number missing").strip("; ")
@@ -1843,6 +1996,7 @@ def process_attachment(
         else:
             withheld = None
 
+        status, reason = _ensure_reason(status, reason, category, blocking_flags)
         notes_parts = []  # type: List[str]
         if reason:
             notes_parts.append("reasons: " + reason.replace(" | ", " / "))
@@ -2065,41 +2219,113 @@ def process_eml(session, message, eml_path, categories, reprocess=False):
     return results
 
 
+def _is_image(filename, data):
+    # type: (str, bytes) -> bool
+    name = (filename or "").lower()
+    if name.endswith((".jpg", ".jpeg", ".png", ".gif", ".webp", ".heic", ".heif")):
+        return True
+    if data[:3] == b"\xff\xd8\xff":
+        return True
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return True
+    if data[:4] == b"GIF8":
+        return True
+    if len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return True
+    return False
+
+
+def _image_for_model(data, filename):
+    # type: (bytes, str) -> tuple
+    """Return (bytes, mime) the vision model can read. The saved file stays original."""
+    if data[:3] == b"\xff\xd8\xff":
+        return data, "image/jpeg"
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return data, "image/png"
+    if data[:4] == b"GIF8":
+        return data, "image/gif"
+    if len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return data, "image/webp"
+    import io
+
+    from PIL import Image
+
+    try:
+        image = Image.open(io.BytesIO(data))
+        if image.mode not in ("RGB", "L"):
+            image = image.convert("RGB")
+        buffer = io.BytesIO()
+        image.save(buffer, format="JPEG", quality=85)
+    except Exception:
+        raise RuntimeError("this image format is not supported; use JPEG, PNG or PDF")
+    return buffer.getvalue(), "image/jpeg"
+
+
+def save_scan_file(data, filename):
+    # type: (bytes, str) -> Path
+    """Store a phone upload under data/uploads. The same bytes are not written twice."""
+    return _save_attachment(data, filename or "scan", UPLOAD_DIR)
+
+
 def process_scan_bytes(session, data, filename, note, categories):
     # type: (Session, bytes, str, str, list) -> List[Dict[str, Any]]
-    """Process one PDF the way a scan upload does: no sender and no email body.
+    """Process one scanned PDF or photo: no sender and no email body.
 
     `note` is optional text the owner typed with the scan. It is the only context.
+    Photos are read by the vision model, then validated like an email attachment.
     """
+    from app.llm import file_cache
+
     digest = hashlib.sha256(data).hexdigest()
+    safe_name = filename or "scan.pdf"
     message = MailMessage(
         sender="",
         subject="",
         date=None,
         body=note or "",
         attachments=[],
-        source_path=filename,
+        source_path=safe_name,
         message_id="scan:%s" % digest,
     )
-    attachment = Attachment(
-        filename=filename or "scan.pdf",
-        content_type="application/pdf",
-        data=data,
-    )
-    results = process_attachment(
-        session,
-        message,
-        attachment,
-        Path(filename or "scan.pdf"),
-        categories,
-    )
-    for item in results:
-        item["email"] = "scan:%s" % (filename or "scan.pdf")
-    finalize_documents(session)
-    _patch_duplicate_results(session, results)
-    from app.pending import attach_late_results
+    prepared = None
+    content_type = "application/pdf"
+    rule_text = ""
+    with file_cache(data):
+        if _is_image(safe_name, data):
+            from app.extract import extract_image_document, extraction_text
 
-    attach_late_results(session, results, message)
+            image_bytes, content_type = _image_for_model(data, safe_name)
+            extracted = extract_image_document(
+                image_bytes, message, categories, mime=content_type
+            )
+            rule_text = extraction_text(extracted)
+            prepared = (rule_text, extracted)
+        else:
+            rule_text = pdf_text(data)
+        attachment = Attachment(
+            filename=safe_name,
+            content_type=content_type,
+            data=data,
+        )
+        results = process_attachment(
+            session,
+            message,
+            attachment,
+            Path(safe_name),
+            categories,
+            prepared=prepared,
+            store_dir=UPLOAD_DIR,
+        )
+        for item in results:
+            item["email"] = "scan:%s" % safe_name
+        finalize_documents(session)
+        _patch_duplicate_results(session, results)
+        from app.pending import attach_late_results
+
+        attach_late_results(session, results, message)
+        from app.receipts import apply_receipt_rules
+
+        apply_receipt_rules(session, results, rule_text, note or "")
     return results
 
 

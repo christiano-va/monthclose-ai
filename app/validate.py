@@ -66,6 +66,14 @@ _KIND_ALIASES = {
     "debit_note": "invoice",
     "receipt": "receipt",
     "recibo": "receipt",
+    "fatura_simplificada": "receipt",
+    "factura_simplificada": "receipt",
+    "simplified_invoice": "receipt",
+    "fs": "receipt",
+    "fr": "receipt",
+    "talao": "receipt",
+    "talao_de_caixa": "receipt",
+    "till_slip": "receipt",
     "payslip": "payslip",
     "recibo_vencimento": "payslip",
     "vencimento": "payslip",
@@ -487,6 +495,121 @@ def _check_due_date(extracted, doc_date, errors):
     return due
 
 
+def _format_rate(rate):
+    # type: (Decimal) -> str
+    whole = rate.quantize(Decimal("1"))
+    if rate == whole:
+        return str(whole)
+    return str(rate)
+
+
+def _sum_rate_rows(pairs):
+    # type: (Sequence[Tuple[Decimal, Decimal, Decimal]]) -> List[Tuple[Decimal, Decimal, Decimal]]
+    buckets = {}  # type: Dict[Decimal, List[Decimal]]
+    order = []  # type: List[Decimal]
+    for rate, base, vat in pairs:
+        key = to_money(rate)
+        if key not in buckets:
+            buckets[key] = [ZERO, ZERO]
+            order.append(key)
+        buckets[key][0] += base
+        buckets[key][1] += vat
+    rows = []  # type: List[Tuple[Decimal, Decimal, Decimal]]
+    for key in order:
+        rows.append((key, to_money(buckets[key][0]), to_money(buckets[key][1])))
+    return rows
+
+
+def _rate_rows_from_lines(extracted):
+    # type: (Dict[str, Any]) -> List[Tuple[Decimal, Decimal, Decimal]]
+    try:
+        parsed = line_items(extracted)
+    except (InvalidOperation, ValueError):
+        return []
+    return _sum_rate_rows(
+        (line["vat_rate"], line["base"], line["vat"]) for line in parsed
+    )
+
+
+def _rate_detail(rows):
+    # type: (Sequence[Tuple[Decimal, Decimal, Decimal]]) -> str
+    parts = []  # type: List[str]
+    for rate, base, vat in rows:
+        parts.append("%s%% base %s + VAT %s" % (_format_rate(rate), base, vat))
+    return ", ".join(parts)
+
+
+def _rates_match(left, right):
+    # type: (Sequence[Tuple[Decimal, Decimal, Decimal]], Sequence[Tuple[Decimal, Decimal, Decimal]]) -> bool
+    if len(left) != len(right):
+        return False
+    right_by_rate = {}  # type: Dict[Decimal, Tuple[Decimal, Decimal]]
+    for rate, base, vat in right:
+        right_by_rate[rate] = (base, vat)
+    for rate, base, vat in left:
+        other = right_by_rate.get(rate)
+        if other is None:
+            return False
+        if not money_equal(base, other[0]) or not money_equal(vat, other[1]):
+            return False
+    return True
+
+
+def vat_rate_note(extracted, total, errors):
+    # type: (Dict[str, Any], Decimal, List[str]) -> str
+    """Sum each VAT rate and check base + VAT equals the total within 0.01.
+
+    Several rates stay as separate lines. The largest rate does not replace the others.
+    Returns the line to show in reasons when more than one rate is present and the sum holds.
+    """
+    try:
+        summary = _sum_rate_rows(_vat_lines(extracted))
+    except (InvalidOperation, ValueError):
+        summary = []
+    try:
+        from_lines = _rate_rows_from_lines(extracted)
+    except (InvalidOperation, ValueError):
+        from_lines = []
+    rows = summary or from_lines
+    if summary and from_lines and not _rates_match(summary, from_lines):
+        errors.append(
+            "VAT by rate %s != lines summed by rate %s"
+            % (_rate_detail(summary), _rate_detail(from_lines))
+        )
+        rows = summary
+    if not rows:
+        return ""
+    base_sum = ZERO
+    vat_sum = ZERO
+    for _rate, base, vat in rows:
+        base_sum += base
+        vat_sum += vat
+    base_sum = to_money(base_sum)
+    vat_sum = to_money(vat_sum)
+    detail = _rate_detail(rows)
+    if not money_equal(base_sum + vat_sum, total):
+        errors.append(
+            "VAT by rate: %s, base %s + VAT %s != total %s (tolerance 0.01)"
+            % (detail, base_sum, vat_sum, to_money(total))
+        )
+        return ""
+    if len(rows) < 2:
+        return ""
+    return "VAT by rate: %s (base %s + VAT %s = total %s)" % (
+        detail,
+        base_sum,
+        vat_sum,
+        to_money(total),
+    )
+
+
+def _with_vat_note(result, note):
+    # type: (Dict[str, Any], str) -> Dict[str, Any]
+    if note:
+        result["vat_rates_note"] = note
+    return result
+
+
 def _result(errors, base, vat_sum, total, doc_date, due, nif, kind, foreign_note, deductions):
     # type: (List[str], Decimal, Decimal, Decimal, Optional[date], Optional[date], Optional[str], str, Optional[str], Optional[Decimal]) -> Dict[str, Any]
     return {
@@ -627,8 +750,14 @@ def validate_extraction(extracted, today=None):
 
     if checked_lines is not None:
         base, vat_sum, payable, _lines = checked_lines
-        return _result(
-            errors, base, vat_sum, payable, doc_date, due, nif_norm or None, kind, foreign_note, None
+        note = ""
+        if kind in VAT_CHECK_KINDS:
+            note = vat_rate_note(extracted, payable, errors)
+        return _with_vat_note(
+            _result(
+                errors, base, vat_sum, payable, doc_date, due, nif_norm or None, kind, foreign_note, None
+            ),
+            note,
         )
 
     errors.append("lines are missing")
@@ -670,6 +799,12 @@ def validate_extraction(extracted, today=None):
                 "base %s + VAT %s != total %s (tolerance 0.01)" % (base, vat_sum, total)
             )
 
-    return _result(
-        errors, base, vat_sum, total, doc_date, due, nif_norm or None, kind, foreign_note, None
+    note = ""
+    if kind in VAT_CHECK_KINDS:
+        note = vat_rate_note(extracted, total, errors)
+    return _with_vat_note(
+        _result(
+            errors, base, vat_sum, total, doc_date, due, nif_norm or None, kind, foreign_note, None
+        ),
+        note,
     )

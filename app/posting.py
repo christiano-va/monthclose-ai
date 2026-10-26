@@ -56,6 +56,7 @@ OWNER_TASK_KINDS = (
     "invoice_to_request",
     "confirm_late_document",
     "confirm_explanation",
+    "awaiting_bank_line",
 )
 
 _INVOICE_RE = re.compile(
