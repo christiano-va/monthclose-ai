@@ -4,6 +4,7 @@ import hashlib
 import json
 import logging
 import os
+import time
 from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import Path
@@ -191,22 +192,62 @@ def validate_json(data, schema, path="$"):
         raise LLMError("%s: %s above maximum %s" % (path, data, maximum))
 
 
-def llm_json(prompt, schema, image=None, image_mime="image/jpeg"):
-    # type: (str, Dict[str, Any], Optional[bytes], str) -> Dict[str, Any]
+def _reasoning_rejected(exc):
+    # type: (Exception) -> bool
+    message = str(exc).lower()
+    if "reasoning" not in message:
+        return False
+    code = getattr(exc, "status_code", None)
+    if code is None:
+        response = getattr(exc, "response", None)
+        code = getattr(response, "status_code", None)
+    return code in (None, 400, 422)
+
+
+def _complete(client, kwargs, response_format):
+    # type: (Any, Dict[str, Any], Dict[str, Any]) -> Any
+    try:
+        return client.chat.completions.create(response_format=response_format, **kwargs)
+    except Exception as exc:
+        if kwargs.get("extra_body") and _reasoning_rejected(exc):
+            logger.info("reasoning_effort not supported; retrying without it")
+            print("scan step reasoning_effort unsupported", flush=True)
+            kwargs.pop("extra_body", None)
+            return _complete(client, kwargs, response_format)
+        raise
+
+
+def llm_json(prompt, schema, image=None, image_mime="image/jpeg", reasoning_effort=None):
+    # type: (str, Dict[str, Any], Optional[bytes], str, Optional[str]) -> Dict[str, Any]
     """Call the xAI model and return JSON that matches `schema`, or raise.
 
     When a file cache is active, the same file and the same prompt are read
-    from disk instead of calling the API again.
+    from disk instead of calling the API again. A photo uses low reasoning
+    effort when the model accepts it, so the scan spends less time waiting.
     """
     model = vision_model_name() if image else _model_name()
-    system = (
-        "You extract structured data. Reply with JSON only, matching the "
-        "given schema. Use ISO dates YYYY-MM-DD. Express money as strings "
-        "with two decimal places (example: \"184.50\"), never as floats."
-    )
-    user = prompt + "\n\nJSON schema:\n" + json.dumps(schema, ensure_ascii=False, indent=2)
+    if image is not None and reasoning_effort is None:
+        reasoning_effort = "low"
+    if image is not None:
+        system = (
+            "You read one document photo and reply with JSON only. "
+            "Dates are YYYY-MM-DD. Money is a string with two decimals, never a float. "
+            "Use null when a value is not printed."
+        )
+        schema_blob = json.dumps(schema, ensure_ascii=False, separators=(",", ":"))
+    else:
+        system = (
+            "You extract structured data. Reply with JSON only, matching the "
+            "given schema. Use ISO dates YYYY-MM-DD. Express money as strings "
+            "with two decimal places (example: \"184.50\"), never as floats."
+        )
+        schema_blob = json.dumps(schema, ensure_ascii=False, indent=2)
+    user = prompt + "\n\nJSON schema:\n" + schema_blob
     cached = _read_cache(_cache_file(model, user, schema, image), schema)
     if cached is not None:
+        if image is not None:
+            logger.info("scan step vision_api cache_hit 0.000s")
+            print("scan step vision_api cache_hit 0.000s", flush=True)
         return cached
 
     if image:
@@ -230,26 +271,28 @@ def llm_json(prompt, schema, image=None, image_mime="image/jpeg"):
         ],
         "temperature": 0,
     }
+    if reasoning_effort:
+        kwargs["extra_body"] = {"reasoning_effort": reasoning_effort}
+    schema_format = {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "extraction",
+            "schema": schema,
+            "strict": True,
+        },
+    }
     global _LLM_CALLS
     _LLM_CALLS += 1
+    started = time.perf_counter()
     try:
-        response = client.chat.completions.create(
-            response_format={
-                "type": "json_schema",
-                "json_schema": {
-                    "name": "extraction",
-                    "schema": schema,
-                    "strict": True,
-                },
-            },
-            **kwargs
-        )
+        response = _complete(client, kwargs, schema_format)
     except Exception:
         _LLM_CALLS += 1
-        response = client.chat.completions.create(
-            response_format={"type": "json_object"},
-            **kwargs
-        )
+        response = _complete(client, kwargs, {"type": "json_object"})
+    if image is not None:
+        seconds = time.perf_counter() - started
+        logger.info("scan step vision_api %.3fs", seconds)
+        print("scan step vision_api %.3fs" % seconds, flush=True)
 
     content = response.choices[0].message.content
     if not content:

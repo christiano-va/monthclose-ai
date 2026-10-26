@@ -1,28 +1,68 @@
 """Phone scan page: one photo or PDF, then the same checks as an email."""
 import hashlib
 import hmac
-import html
 import json
 import logging
+import threading
+import time
+import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
+from fastapi.responses import JSONResponse
 from sqlmodel import Session, select
 
-from app.db import get_session
+from app.db import engine, get_session
 from app.extract import list_categories
+from app.i18n import text
 from app.models import Category, Document, PhoneScan
 from app.money import to_money
 from app.posting import note_value
 from app.process_one import process_scan_bytes, save_scan_file
 from app.settings import scan_code
+from app.ui import (
+    esc,
+    html_response,
+    month_title,
+    page_href,
+    prefers_html,
+    present_scan_card,
+    render_page,
+    resolve_lang,
+    selected_month,
+)
 
 logger = logging.getLogger("app.phone")
 router = APIRouter()
 
 MAX_SCAN_BYTES = 20 * 1024 * 1024
+_JOBS = {}  # type: Dict[str, Dict[str, Any]]
+_JOBS_LOCK = threading.Lock()
+
+_SCAN_STRINGS = (
+    "scan_elapsed",
+    "scan_progress",
+    "scan_another",
+    "see_recent",
+    "pending_next",
+    "retry",
+    "doc_other",
+    "step_uploading",
+    "step_reading",
+    "step_validating",
+    "step_matching",
+    "step_done",
+    "error_bad_code",
+    "error_offline",
+    "error_unreadable",
+    "error_empty",
+    "error_too_large",
+    "error_bad_type",
+    "error_failed",
+    "error_not_ready",
+    "error_unknown_job",
+)
 
 
 def codes_match(given):
@@ -33,11 +73,6 @@ def codes_match(given):
     left = hashlib.sha256(given.strip().encode("utf-8")).hexdigest()
     right = hashlib.sha256(expected.encode("utf-8")).hexdigest()
     return hmac.compare_digest(left, right)
-
-
-def _wants_json(request):
-    # type: (Request) -> bool
-    return "application/json" in (request.headers.get("accept") or "")
 
 
 def _allowed(filename, content_type):
@@ -132,165 +167,6 @@ def _record_scan(session, filename, data, cards):
     session.commit()
 
 
-def _esc(value):
-    # type: (Any) -> str
-    return html.escape("" if value is None else str(value))
-
-
-def _card_html(card):
-    # type: (Dict[str, Any]) -> str
-    pending = card.get("pending_item")
-    if pending:
-        pending_html = (
-            "<p class='pending'><strong>Pending item resolved:</strong> %s</p>"
-            % _esc(
-                "%s — %s"
-                % (pending.get("id") or "", pending.get("description") or pending.get("kind") or "")
-            )
-        )
-    else:
-        pending_html = ""
-    confidence = card.get("confidence")
-    try:
-        confidence_text = "%.2f" % float(confidence)
-    except (TypeError, ValueError):
-        confidence_text = _esc(confidence)
-    rows = [
-        ("Document type", card.get("document_type")),
-        ("Entity", card.get("entity")),
-        ("NIF", card.get("nif")),
-        ("Date", card.get("date")),
-        ("Total", card.get("total")),
-        ("VAT", card.get("vat")),
-        ("Category", card.get("category")),
-        ("Status", card.get("status")),
-        ("Confidence", confidence_text),
-        ("Reasons", card.get("reasons")),
-    ]
-    body = []
-    for label, value in rows:
-        shown = value if value not in (None, "") else "—"
-        if label == "Confidence":
-            shown = confidence_text
-        body.append(
-            "<div class='row'><span>%s</span><strong>%s</strong></div>"
-            % (_esc(label), _esc(shown))
-        )
-    return "<article class='card'>%s%s</article>" % ("".join(body), pending_html)
-
-
-def render_scan_page(cards=None, error=""):
-    # type: (Optional[List[Dict[str, Any]]], str) -> str
-    cards = cards or []
-    error_html = "<p class='error'>%s</p>" % _esc(error) if error else ""
-    cards_html = "".join(_card_html(card) for card in cards)
-    return """<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Scan a document</title>
-<style>
-  body { margin: 0; padding: 16px; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f4f1ea; color: #1c1917; }
-  main { max-width: 32rem; margin: 0 auto; }
-  h1 { font-size: 1.7rem; margin: 0 0 8px; }
-  p.lead { margin: 0 0 16px; line-height: 1.4; }
-  a { color: #1d4e4a; font-size: 1.1rem; }
-  label { display: block; font-weight: 700; margin: 16px 0 8px; }
-  input, textarea { width: 100%%; box-sizing: border-box; font-size: 1.15rem; padding: 14px; border: 1px solid #d6d3d1; border-radius: 12px; background: white; }
-  textarea { min-height: 5rem; }
-  button { width: 100%%; margin-top: 18px; padding: 18px; font-size: 1.25rem; font-weight: 700; color: white; background: #1d4e4a; border: 0; border-radius: 14px; }
-  .card { background: white; border-radius: 16px; padding: 8px 16px 16px; margin-top: 20px; }
-  .row { display: flex; justify-content: space-between; gap: 12px; padding: 10px 0; border-bottom: 1px solid #eee; }
-  .row span { color: #57534e; }
-  .row strong { text-align: right; }
-  .pending { margin: 12px 0 0; }
-  .error { color: #9f1239; font-weight: 700; }
-</style>
-</head>
-<body>
-<main>
-  <h1>Scan a document</h1>
-  <p class="lead">Photograph a receipt or choose a PDF. The books are updated after you send it.</p>
-  <p><a href="/scan/recent">Recent scans</a></p>
-  <form id="scan-form" action="/scan/upload" method="post" enctype="multipart/form-data">
-    <label for="file">Document</label>
-    <input id="file" name="file" type="file" accept="image/*,application/pdf" capture="environment" required>
-    <label for="note">Note (optional)</label>
-    <textarea id="note" name="note" maxlength="500"></textarea>
-    <label for="code">Access code</label>
-    <input id="code" name="code" type="text" autocomplete="off" maxlength="40" required>
-    <button type="submit">Send scan</button>
-  </form>
-  <div id="result">%s%s</div>
-</main>
-<script>
-document.getElementById("scan-form").addEventListener("submit", function (event) {
-  if (!window.fetch) return;
-  event.preventDefault();
-  var form = event.target;
-  var result = document.getElementById("result");
-  result.innerHTML = "<p>Reading the document…</p>";
-  fetch("/scan/upload", {
-    method: "POST",
-    body: new FormData(form),
-    headers: { "Accept": "application/json" }
-  }).then(function (response) {
-    return response.json().then(function (body) {
-      return { ok: response.ok, body: body };
-    });
-  }).then(function (payload) {
-    var cards = (payload.body && payload.body.results) || [];
-    if (!payload.ok && !cards.length) {
-      var detail = (payload.body && payload.body.detail) || "The scan was not accepted.";
-      result.innerHTML = "<p class='error'>" + String(detail) + "</p>";
-      return;
-    }
-    result.innerHTML = cards.map(renderCard).join("");
-  }).catch(function () {
-    result.innerHTML = "<p class='error'>The scan could not be sent.</p>";
-  });
-});
-function esc(value) {
-  return String(value == null ? "" : value).replace(/[&<>"]/g, function (ch) {
-    return ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[ch];
-  });
-}
-function renderCard(card) {
-  var confidence = card.confidence;
-  var confidenceText = (typeof confidence === "number") ? confidence.toFixed(2) : esc(confidence);
-  var rows = [
-    ["Document type", card.document_type],
-    ["Entity", card.entity],
-    ["NIF", card.nif],
-    ["Date", card.date],
-    ["Total", card.total],
-    ["VAT", card.vat],
-    ["Category", card.category],
-    ["Status", card.status],
-    ["Confidence", confidenceText],
-    ["Reasons", card.reasons]
-  ];
-  var html = "<article class='card'>";
-  rows.forEach(function (row) {
-    var shown = row[1] === 0 || row[1] ? row[1] : "—";
-    if (!shown && shown !== 0) shown = "—";
-    html += "<div class='row'><span>" + esc(row[0]) + "</span><strong>" + esc(shown) + "</strong></div>";
-  });
-  if (card.pending_item) {
-    html += "<p class='pending'><strong>Pending item resolved:</strong> " + esc(card.pending_item.description || card.pending_item.kind || "") + "</p>";
-  }
-  return html + "</article>";
-}
-</script>
-</body>
-</html>
-""" % (
-        error_html,
-        cards_html,
-    )
-
-
 def _empty_card(status, reasons, filename):
     # type: (str, str, str) -> Dict[str, Any]
     return {
@@ -310,64 +186,291 @@ def _empty_card(status, reasons, filename):
     }
 
 
-@router.get("/scan", response_class=HTMLResponse)
-def scan_page():
-    return HTMLResponse(render_scan_page())
+def _remember_job(job):
+    # type: (Dict[str, Any]) -> None
+    with _JOBS_LOCK:
+        _JOBS[job["id"]] = job
+        if len(_JOBS) <= 40:
+            return
+        oldest = sorted(_JOBS.values(), key=lambda item: item["started"])
+        for item in oldest[:-40]:
+            _JOBS.pop(item["id"], None)
+
+
+def _update_job(job_id, **changes):
+    # type: (str, object) -> None
+    with _JOBS_LOCK:
+        job = _JOBS.get(job_id)
+        if job is None:
+            return
+        job.update(changes)
+
+
+def _job_snapshot(job_id):
+    # type: (str) -> Optional[Dict[str, Any]]
+    with _JOBS_LOCK:
+        job = _JOBS.get(job_id)
+        if job is None:
+            return None
+        return {
+            "id": job["id"],
+            "step": job["step"],
+            "started": job["started"],
+            "error": job.get("error"),
+            "results": job.get("results"),
+        }
+
+
+def _run_job(job_id, data, filename, note):
+    # type: (str, bytes, str, str) -> None
+    started = time.perf_counter()
+    try:
+        with Session(engine) as session:
+            categories = list_categories(session)
+            if not categories:
+                _update_job(job_id, step="error", error="not_ready")
+                return
+
+            def on_step(name):
+                # type: (str) -> None
+                _update_job(job_id, step=name)
+
+            results = process_scan_bytes(
+                session, data, filename, note, categories, on_step=on_step
+            )
+            cards = [scan_card(session, item) for item in results]
+            if not cards:
+                cards = [_empty_card("error", "unreadable", filename)]
+            _record_scan(session, filename, data, cards)
+            _update_job(job_id, step="done", results=cards, error=None)
+    except Exception:
+        logger.exception("scan failed")
+        print("scan step error %.3fs" % (time.perf_counter() - started), flush=True)
+        _update_job(job_id, step="error", error="unreadable")
+        return
+    seconds = time.perf_counter() - started
+    logger.info("scan step total %.3fs", seconds)
+    print("scan step total %.3fs" % seconds, flush=True)
+
+
+def _error(code, status):
+    # type: (str, int) -> JSONResponse
+    return JSONResponse(status_code=status, content={"error": code})
+
+
+def _strings(lang, month):
+    # type: (str, str) -> str
+    payload = {}
+    for key in _SCAN_STRINGS:
+        payload[key] = text(lang, key)
+    payload["recent_href"] = page_href("/scan/recent", month, lang)
+    return json.dumps(payload, ensure_ascii=False)
+
+
+def render_scan_page(lang, month, months):
+    # type: (str, str, List[str]) -> str
+    body = """
+<h1>%s</h1>
+<p class="lead">%s</p>
+<p><a href="%s">%s</a></p>
+<form id="scan-form" action="/scan/upload" method="post" enctype="multipart/form-data">
+  <label for="file">%s</label>
+  <input id="file" name="file" type="file" accept="image/*,application/pdf" capture="environment" required>
+  <label for="note">%s</label>
+  <textarea id="note" name="note" maxlength="500"></textarea>
+  <label for="code">%s</label>
+  <input id="code" name="code" type="text" autocomplete="off" maxlength="40" required>
+  <button id="scan-send" type="submit">%s</button>
+</form>
+<noscript><p class="error-card">%s</p></noscript>
+<div id="result"></div>
+<script type="application/json" id="scan-strings">%s</script>
+""" % (
+        esc(text(lang, "scan_title")),
+        esc(text(lang, "scan_lead")),
+        esc(page_href("/scan/recent", month, lang)),
+        esc(text(lang, "see_recent")),
+        esc(text(lang, "scan_file")),
+        esc(text(lang, "scan_note")),
+        esc(text(lang, "scan_code")),
+        esc(text(lang, "scan_send")),
+        esc(text(lang, "scan_noscript")),
+        _strings(lang, month),
+    )
+    return render_page(
+        lang,
+        "scan",
+        month,
+        months,
+        text(lang, "scan_title"),
+        body,
+        "/scan",
+    )
+
+
+def _stored_cards(row):
+    # type: (PhoneScan) -> List[Dict[str, Any]]
+    try:
+        payload = json.loads(row.payload or "{}")
+    except ValueError:
+        return []
+    results = payload.get("results") if isinstance(payload, dict) else None
+    if not isinstance(results, list):
+        return []
+    return [item for item in results if isinstance(item, dict)]
+
+
+def render_recent_page(lang, month, months, rows):
+    # type: (str, str, List[str], List[PhoneScan]) -> str
+    cards = []
+    for row in rows:
+        when = ""
+        if row.created_at is not None:
+            when = row.created_at.strftime("%Y-%m-%d %H:%M")
+        stored = _stored_cards(row)
+        if not stored:
+            cards.append(
+                "<article class='card'><h2>%s</h2><p class='quiet'>%s</p></article>"
+                % (esc(row.filename), esc(when))
+            )
+            continue
+        for card in stored:
+            view = present_scan_card(card, lang)
+            cards.append(
+                """
+<article class="card result-card">
+  <p class="quiet">%s · %s</p>
+  <h2 class="doc-type">%s</h2>
+  <p class="entity">%s</p>
+  <p class="total">%s</p>
+  <p class="when">%s</p>
+  <p><span class="chip chip-%s">%s</span></p>
+  <p class="reason">%s</p>
+  <p class="next-action"><strong>%s</strong> %s</p>
+</article>
+"""
+                % (
+                    esc(when),
+                    esc(row.filename),
+                    esc(view["document_type"]),
+                    esc(view["entity"]),
+                    esc(view["total"]),
+                    esc(view["date"]),
+                    esc(view["tone"]),
+                    esc(view["status_label"]),
+                    esc(view["reason"]),
+                    esc(text(lang, "pending_next")),
+                    esc(view["next_action"]),
+                )
+            )
+    if cards:
+        body_cards = "".join(cards)
+    else:
+        body_cards = "<p class='quiet'>%s</p>" % esc(text(lang, "scan_recent_empty"))
+    body = "<h1>%s</h1><p><a href='%s'>%s</a></p>%s" % (
+        esc(text(lang, "scan_recent_title")),
+        esc(page_href("/scan", month, lang)),
+        esc(text(lang, "scan_title")),
+        body_cards,
+    )
+    return render_page(
+        lang,
+        "scan",
+        month,
+        months,
+        text(lang, "scan_recent_title"),
+        body,
+        "/scan/recent",
+    )
+
+
+@router.get("/scan")
+def scan_page(
+    request: Request,
+    session: Session = Depends(get_session),
+):
+    lang = resolve_lang(request)
+    month, months = selected_month(session, request.query_params.get("month"))
+    return html_response(render_scan_page(lang, month, months), lang)
 
 
 @router.get("/scan/recent")
-def recent_scans(session: Session = Depends(get_session)) -> List[dict]:
+def recent_scans(
+    request: Request,
+    session: Session = Depends(get_session),
+):
     rows = session.exec(select(PhoneScan).order_by(PhoneScan.id.desc())).all()
-    payload = []
-    for row in rows[:20]:
-        created = row.created_at.isoformat() if row.created_at else None
-        payload.append(
-            {
-                "id": row.id,
-                "created_at": created,
-                "filename": row.filename,
-                "status": row.status,
-                "document_id": row.document_id,
-            }
-        )
-    return payload
+    latest = rows[:20]
+    if not prefers_html(request):
+        payload = []
+        for row in latest:
+            created = row.created_at.isoformat() if row.created_at else None
+            payload.append(
+                {
+                    "id": row.id,
+                    "created_at": created,
+                    "filename": row.filename,
+                    "status": row.status,
+                    "document_id": row.document_id,
+                }
+            )
+        return payload
+    lang = resolve_lang(request)
+    month, months = selected_month(session, request.query_params.get("month"))
+    return html_response(render_recent_page(lang, month, months, latest), lang)
 
 
 @router.post("/scan/upload")
 def upload_scan(
-    request: Request,
     file: UploadFile = File(...),
     note: str = Form(""),
     code: str = Form(""),
-    session: Session = Depends(get_session),
 ):
+    """Accept the file and return a job id. Reading continues in the background."""
     if not codes_match(code):
-        raise HTTPException(status_code=401, detail="invalid access code")
+        return _error("bad_code", 401)
     filename = file.filename or "scan"
     if not _allowed(filename, file.content_type or ""):
-        raise HTTPException(status_code=400, detail="send a photo or a PDF")
+        return _error("bad_type", 400)
     data = file.file.read()
     if not data:
-        raise HTTPException(status_code=400, detail="the file is empty")
+        return _error("empty", 400)
     if len(data) > MAX_SCAN_BYTES:
-        raise HTTPException(status_code=400, detail="the file is larger than 20 MB")
+        return _error("too_large", 400)
     save_scan_file(data, filename)
-    categories = list_categories(session)
-    if not categories:
-        raise HTTPException(status_code=409, detail="Category table is empty")
-    try:
-        results = process_scan_bytes(session, data, filename, note or "", categories)
-        cards = [scan_card(session, item) for item in results]
-    except Exception:
-        logger.exception("scan failed")
-        cards = [_empty_card("error", "Could not read the scan.", filename)]
-        _record_scan(session, filename, data, cards)
-        if _wants_json(request):
-            return JSONResponse(status_code=502, content={"results": cards})
-        return HTMLResponse(render_scan_page(cards), status_code=502)
-    if not cards:
-        cards = [_empty_card("review", "No document was stored.", filename)]
-    _record_scan(session, filename, data, cards)
-    if _wants_json(request):
-        return {"results": cards}
-    return HTMLResponse(render_scan_page(cards))
+    job_id = uuid.uuid4().hex[:12]
+    job = {
+        "id": job_id,
+        "step": "uploading",
+        "started": time.time(),
+        "error": None,
+        "results": None,
+    }
+    _remember_job(job)
+    thread = threading.Thread(
+        target=_run_job,
+        args=(job_id, data, filename, note or ""),
+        name="scan-%s" % job_id,
+    )
+    thread.daemon = True
+    thread.start()
+    return {"id": job_id, "step": "uploading"}
+
+
+@router.get("/scan/status/{job_id}")
+def scan_status(job_id: str, request: Request):
+    job = _job_snapshot(job_id)
+    if job is None:
+        return _error("unknown_job", 404)
+    lang = resolve_lang(request)
+    elapsed = int(max(0, time.time() - job["started"]))
+    results = None
+    if job["step"] == "done":
+        results = [present_scan_card(card, lang) for card in (job.get("results") or [])]
+    return {
+        "id": job["id"],
+        "step": job["step"],
+        "elapsed": elapsed,
+        "error": job.get("error"),
+        "results": results,
+    }

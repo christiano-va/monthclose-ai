@@ -33,7 +33,7 @@ source venv/bin/activate
 uvicorn app.main:app --reload
 ```
 
-Interactive docs are at `http://127.0.0.1:8000/docs`. A browser open on `http://127.0.0.1:8000/` shows the dashboard: a month selector, the close checklist, document counters, pending items, and links to the monthly report and the phone scan, plus **Sync now**. API clients that do not ask for HTML still receive the JSON service name.
+Interactive docs are at `http://127.0.0.1:8000/docs`. A browser open on `http://127.0.0.1:8000/` shows the dashboard in Portuguese. The header has the company name, the month, and a PT/EN switch. The choice is kept in a `lang` cookie and can also be set with `?lang=en` or `?lang=pt`. A bottom tab bar on a phone, and a top bar on a wide screen, links the dashboard, the scan, the report and the pending list. The dashboard leads with what needs attention, then the month close, then Scan, Sync now and the report. API clients that do not ask for HTML still receive the JSON service name.
 
 ## Google Gmail and Drive
 
@@ -70,7 +70,7 @@ Labels: `monthclose` and `monthclose-processed` are created if they are missing.
 
 Owner drafts: open `missing_document`, `missing_sales_invoice` and `invoice_to_request` tasks become Gmail drafts addressed to `OWNER_EMAIL`. The draft asks the owner to find the document, to ask the supplier or the customer for a second copy, or to issue the invoice, and to reply with the file or send it through `/scan`. An unknown amount is written as “amount to be confirmed”. The app never calls send. A task that already has a draft is updated in place.
 
-Model replies stay cached by file hash under `data/cache/`, so a second sync does not call the model again for the same file. The monthly-report summary is cached per month together with a hash of the figures, so reloading the report does not call the model again while those figures are unchanged.
+Model replies stay cached by file hash under `data/cache/`, so a second sync does not call the model again for the same file. The monthly-report summary is cached per month and per language, together with a hash of the figures, so reloading the report in the same language does not call the model again while those figures are unchanged.
 
 ## Phone scan
 
@@ -88,7 +88,9 @@ On the phone:
 3. On the phone, open `http://IP:8000/scan` (replace `IP` with that address).
 4. Enter the access code from `SCAN_CODE` in `.env`, take a photo or choose a PDF, add a note if you want, and send it.
 
-The page lists the last scans at `http://IP:8000/scan/recent`. A photo is read by the vision model. A PDF is read as text. Both then go through the same validation, classification and pending-item match as an email attachment. The same file is not sent to the model again: replies are cached by the file hash.
+The phone shrinks a photo to 1600 pixels and sends it as JPEG before the upload. A PDF is sent as it is. `POST /scan/upload` returns a job id at once. The page asks `GET /scan/status/{id}` every 700 ms and shows the step: uploading, reading, validating, matching, done, or an error with a retry. A wrong code, a lost connection, or a photo that cannot be read is explained in plain language.
+
+The page lists the last scans at `http://IP:8000/scan/recent`. A photo is read by the vision model with a short prompt and low reasoning effort when the model accepts it. A PDF is read as text. Both then go through the same validation, classification and pending-item match as an email attachment. The same file is not sent to the model again: replies are cached by the file hash. The server log prints the seconds spent on each step.
 
 Uploads are stored under `data/uploads/` and are not committed. A restaurant, fuel, parking or stationery receipt is checked in code. If the company NIF is not printed, the VAT is not deductible and the NIF is left blank. Fuel and restaurant VAT stay marked to review, because the processing code does not apply a special rate. A cash payment or a personal card is status `awaiting bank line` and an owner task, not an error.
 

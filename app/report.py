@@ -26,12 +26,14 @@ from app.posting import (
     risk_flag_names,
     suspect_flags,
 )
+from app.i18n import text
 from app.settings import company_name
+from app.ui import esc, long_date, month_status_label, month_title, render_page, show_date
 
 logger = logging.getLogger("app.report")
 
 CACHE_DIR = ROOT / "data" / "cache" / "report_summaries"
-PROMPT_VERSION = "2026-10-26-v2"
+PROMPT_VERSION = "2026-10-26-v3"
 DUE_WINDOW_DAYS = 30
 
 _MONTHS = (
@@ -92,7 +94,7 @@ def document_is_suspect(document, category_code):
 
 def _esc(value):
     # type: (object) -> str
-    return html.escape("" if value is None else str(value), quote=True)
+    return esc(value)
 
 
 def _one_line(text):
@@ -416,14 +418,14 @@ def figures_hash(figures):
     return hashlib.sha256(material.encode("utf-8")).hexdigest()
 
 
-def _cache_path(month):
-    # type: (str) -> Any
-    return CACHE_DIR / ("%s.json" % month)
+def _cache_path(month, lang):
+    # type: (str, str) -> Any
+    return CACHE_DIR / ("%s.%s.json" % (month, lang))
 
 
-def _read_cache(month, digest):
-    # type: (str, str) -> Optional[Dict[str, Any]]
-    path = _cache_path(month)
+def _read_cache(month, lang, digest):
+    # type: (str, str, str) -> Optional[Dict[str, Any]]
+    path = _cache_path(month, lang)
     if not path.is_file():
         return None
     try:
@@ -445,8 +447,8 @@ def _read_cache(month, digest):
     }
 
 
-def _write_cache(month, digest, summary, confidence, justification):
-    # type: (str, str, str, object, str) -> None
+def _write_cache(month, lang, digest, summary, confidence, justification):
+    # type: (str, str, str, str, object, str) -> None
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     payload = {
         "prompt_version": PROMPT_VERSION,
@@ -455,19 +457,30 @@ def _write_cache(month, digest, summary, confidence, justification):
         "confidence": confidence,
         "justification": justification,
     }
-    _cache_path(month).write_text(
+    _cache_path(month, lang).write_text(
         json.dumps(payload, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
 
 
-def _summary_prompt(figures):
-    # type: (Dict[str, Any]) -> str
+def _summary_prompt(figures, lang):
+    # type: (Dict[str, Any], str) -> str
     blob = json.dumps(figures, ensure_ascii=False, indent=2)
+    if lang == "pt":
+        audience = (
+            "Write 5 to 8 sentences in European Portuguese (pt-PT). "
+            "The reader is the dono of a Portuguese micro-company. "
+            "Use these words when they fit: fatura, IVA, extrato, pendências, fecho do mês, dono. "
+            "Do not use Brazilian spelling."
+        )
+    else:
+        audience = (
+            "Write 5 to 8 sentences in plain English. "
+            "The reader is the owner of a Portuguese micro-company."
+        )
     return (
         "Write the executive summary for the monthly report.\n"
-        "The reader is the owner of a Portuguese micro-company. "
-        "Write 5 to 8 sentences in plain English.\n"
+        "%s\n"
         "Use only the figures in the JSON. They were computed by code.\n"
         "Do not add, subtract, multiply, divide, or round.\n"
         "Do not state a profit, a margin, a result, or any difference.\n"
@@ -478,20 +491,20 @@ def _summary_prompt(figures):
         "the bank balances, and how many bank lines and pending items still need attention.\n"
         "Write as you would to the owner, in ordinary sentences, not as a list of field names.\n"
         "You may name the largest expense category. Do not list every category.\n\n"
-        "Figures:\n%s" % blob
-    )
+        "Figures:\n%s"
+    ) % (audience, blob)
 
 
-def executive_summary(month, figures):
-    # type: (str, Dict[str, Any]) -> Dict[str, Any]
-    """Return the cached prose when the figures hash matches. Otherwise ask the model."""
+def executive_summary(month, figures, lang="pt"):
+    # type: (str, Dict[str, Any], str) -> Dict[str, Any]
+    """Return the cached prose for this language when the figures hash matches."""
     digest = figures_hash(figures)
-    cached = _read_cache(month, digest)
+    cached = _read_cache(month, lang, digest)
     if cached is not None:
-        logger.info("report summary cache hit %s", month)
+        logger.info("report summary cache hit %s %s", month, lang)
         return cached
     try:
-        data = llm_json(_summary_prompt(figures), _SUMMARY_SCHEMA)
+        data = llm_json(_summary_prompt(figures, lang), _SUMMARY_SCHEMA)
     except LLMError:
         logger.error("report summary failed")
         return {
@@ -510,7 +523,7 @@ def executive_summary(month, figures):
         }
     confidence = data.get("confidence")
     justification = _one_line(data.get("justification"))
-    _write_cache(month, digest, summary, confidence, justification)
+    _write_cache(month, lang, digest, summary, confidence, justification)
     return {
         "summary": summary,
         "confidence": confidence,
@@ -529,42 +542,42 @@ def _paragraphs(text):
     return chunks
 
 
-def _figure_rows(figures):
-    # type: (Dict[str, Any]) -> List[Tuple[str, str]]
+def _figure_rows(figures, lang):
+    # type: (Dict[str, Any], str) -> List[Tuple[str, str]]
     labels = (
-        ("revenue_net", "Revenue (net of VAT)"),
-        ("expenses_net", "Expenses (net of VAT)"),
-        ("vat_on_sales", "VAT on sales"),
-        ("deductible_vat", "Deductible VAT"),
-        ("vat_to_pay", "VAT to pay"),
-        ("vat_to_recover", "VAT to recover"),
-        ("bank_balance_start", "Bank balance start"),
-        ("bank_balance_end", "Bank balance end"),
-        ("bank_equation_ok", "Bank equation holds"),
-        ("bank_lines_linked", "Bank lines linked"),
-        ("bank_lines_total", "Bank lines total"),
-        ("unsupported_bank_lines", "Unsupported bank lines"),
-        ("open_pending_items", "Open pending items"),
-        ("accepted_by_owner", "Accepted by the owner"),
-        ("resolved_after_close", "Resolved after close"),
-        ("suspect_documents", "Suspect documents"),
-        ("documents_to_review", "Documents to review"),
-        ("credit_notes_applied", "Credit notes applied"),
-        ("largest_expense_category", "Largest expense category"),
-        ("largest_expense_amount", "Largest expense amount"),
+        "revenue_net",
+        "expenses_net",
+        "vat_on_sales",
+        "deductible_vat",
+        "vat_to_pay",
+        "vat_to_recover",
+        "bank_balance_start",
+        "bank_balance_end",
+        "bank_equation_ok",
+        "bank_lines_linked",
+        "bank_lines_total",
+        "unsupported_bank_lines",
+        "open_pending_items",
+        "accepted_by_owner",
+        "resolved_after_close",
+        "suspect_documents",
+        "documents_to_review",
+        "credit_notes_applied",
+        "largest_expense_category",
+        "largest_expense_amount",
     )
     rows = []  # type: List[Tuple[str, str]]
-    for key, label in labels:
+    for key in labels:
         value = figures.get(key)
         if value is None:
-            shown = "null"
+            shown = "—"
         elif value is True:
-            shown = "true"
+            shown = text(lang, "word_yes")
         elif value is False:
-            shown = "false"
+            shown = text(lang, "word_no")
         else:
             shown = str(value)
-        rows.append((label, shown))
+        rows.append((text(lang, "fig_%s" % key), shown))
     return rows
 
 
@@ -579,21 +592,26 @@ def _table(headers, rows_html):
     return "<table><thead><tr>%s</tr></thead><tbody>%s</tbody></table>" % (head, rows_html)
 
 
-def render_monthly_report(session, month, today=None):
-    # type: (Session, str, Optional[date]) -> str
+def render_monthly_report(session, month, lang="pt", months=None, today=None):
+    # type: (Session, str, str, Optional[List[str]], Optional[date]) -> str
     packed = collect_report(session, month, today=today)
     figures = packed["figures"]
     detail = packed["detail"]
-    written = executive_summary(month, figures)
-    return _render_html(figures, detail, written)
+    written = executive_summary(month, figures, lang)
+    body = _render_html(figures, detail, written, lang)
+    if not months:
+        months = [month]
+    title = "%s — %s" % (text(lang, "report_kicker"), month_title(lang, month))
+    return render_page(lang, "report", month, months, title, body, "/report/%s/view" % month, wide=True)
 
 
-def _render_html(figures, detail, written):
-    # type: (Dict[str, Any], Dict[str, Any], Dict[str, Any]) -> str
+def _render_html(figures, detail, written, lang):
+    # type: (Dict[str, Any], Dict[str, Any], Dict[str, Any], str) -> str
     month = figures["month"]
-    title = _month_title(month)
-    status = (figures.get("status") or "open").capitalize()
-    generated = _long_date(detail["generated"])
+    title = month_title(lang, month)
+    raw_status = figures.get("status") or "open"
+    status = month_status_label(lang, raw_status)
+    generated = long_date(lang, detail["generated"])
     company = figures.get("company") or ""
     running = "%s · %s · %s" % (company, title, status)
 
@@ -601,24 +619,31 @@ def _render_html(figures, detail, written):
     for paragraph in _paragraphs(written.get("summary") or ""):
         summary_bits.append("<p>%s</p>" % _esc(paragraph))
     if not summary_bits:
-        summary_bits.append(
-            "<p>The summary could not be written. The figures beside this note are still from the ledger.</p>"
-        )
+        summary_bits.append("<p>%s</p>" % _esc(text(lang, "report_summary_failed")))
     confidence = written.get("confidence")
     justification = written.get("justification") or ""
     if confidence is not None or justification:
         summary_bits.append(
-            "<p class='confidence'>Confidence %s. %s</p>"
-            % (_esc(confidence if confidence is not None else ""), _esc(justification))
+            "<p class='quiet'>%s</p>"
+            % _esc(
+                text(
+                    lang,
+                    "report_confidence",
+                    confidence="" if confidence is None else confidence,
+                    why=justification,
+                )
+            )
         )
-    cache_label = "Cached summary for these figures." if written.get("cache") == "hit" else ""
-    if written.get("cache") == "miss":
-        cache_label = "Summary written for these figures."
+    cache_label = ""
+    if written.get("cache") == "hit":
+        cache_label = text(lang, "report_cached")
+    elif written.get("cache") == "miss":
+        cache_label = text(lang, "report_written")
     if cache_label:
-        summary_bits.append("<p class='confidence'>%s</p>" % _esc(cache_label))
+        summary_bits.append("<p class='quiet'>%s</p>" % _esc(cache_label))
 
     figure_html = []
-    for label, value in _figure_rows(figures):
+    for label, value in _figure_rows(figures, lang):
         figure_html.append(
             "<tr><th>%s</th><td>%s</td></tr>" % (_esc(label), _esc(value))
         )
@@ -626,7 +651,7 @@ def _render_html(figures, detail, written):
         figure_html.append(
             "<tr><th>%s</th><td>%s</td></tr>"
             % (
-                _esc("Category %s (%s)" % (row["category"], row["tipo"])),
+                _esc(text(lang, "fig_category", name=row["category"], tipo=row["tipo"])),
                 _esc(row["amount"]),
             )
         )
@@ -638,7 +663,7 @@ def _render_html(figures, detail, written):
             % (_esc(row["category"]), _esc(row["tipo"]), _esc(row["amount"]))
         )
     if not category_rows:
-        category_rows.append(_empty_row(3, "No expenses in this month."))
+        category_rows.append(_empty_row(3, text(lang, "report_no_expenses")))
 
     method_rows = []
     for row in detail["methods"]:
@@ -650,10 +675,10 @@ def _render_html(figures, detail, written):
     for row in detail["unsupported"]:
         unsupported_rows.append(
             "<tr><td>%s</td><td>%s</td><td class='num'>%s</td><td>%s</td></tr>"
-            % (_esc(row["id"]), _esc(row["date"]), _esc(row["amount"]), _esc(row["description"]))
+            % (_esc(row["id"]), _esc(show_date(lang, row["date"])), _esc(row["amount"]), _esc(row["description"]))
         )
     if not unsupported_rows:
-        unsupported_rows.append(_empty_row(4, "Every bank line has a supporting document."))
+        unsupported_rows.append(_empty_row(4, text(lang, "report_all_supported")))
 
     def _pending_rows(rows, with_reason):
         # type: (List[Dict[str, Any]], bool) -> str
@@ -668,7 +693,7 @@ def _render_html(figures, detail, written):
                 )
             risk = ""
             if row.get("risk"):
-                risk = " Issuing the sales invoice is a legal obligation."
+                risk = text(lang, "report_legal")
             built.append(
                 "<tr><td>%s</td><td>%s%s</td><td class='num'>%s</td>%s</tr>"
                 % (
@@ -683,27 +708,27 @@ def _render_html(figures, detail, written):
 
     open_body = _pending_rows(detail["open_items"], False)
     if not open_body:
-        open_body = _empty_row(3, "No open pending items.")
+        open_body = _empty_row(3, text(lang, "report_no_open"))
     accepted_body = _pending_rows(detail["accepted"], True)
     if not accepted_body:
-        accepted_body = _empty_row(6, "Nothing was accepted by the owner.")
+        accepted_body = _empty_row(6, text(lang, "report_no_accepted"))
 
     resolved_rows = []
     for row in detail["resolved"]:
-        number = row["number"] or ("document %s" % row["document_id"])
+        number = row["number"] or text(lang, "report_doc_fallback", id=row["document_id"])
         resolved_rows.append(
             "<tr><td>%s</td><td>%s</td><td class='num'>%s</td><td>%s</td></tr>"
-            % (_esc(row["date"]), _esc(number), _esc(row["amount"]), _esc(row["item"]))
+            % (_esc(show_date(lang, row["date"])), _esc(number), _esc(row["amount"]), _esc(row["item"]))
         )
     if not resolved_rows:
-        resolved_rows.append(_empty_row(4, "Nothing was resolved after the month was closed."))
+        resolved_rows.append(_empty_row(4, text(lang, "report_no_resolved")))
 
     suspect_rows = []
     for row in detail["suspects"]:
         suspect_rows.append(
             "<tr><td>%s</td><td>%s</td><td>%s</td><td class='num'>%s</td><td>%s</td><td>%s</td></tr>"
             % (
-                _esc(row["date"]),
+                _esc(show_date(lang, row["date"])),
                 _esc(row["entity"]),
                 _esc(row["number"]),
                 _esc(row["total"]),
@@ -712,14 +737,14 @@ def _render_html(figures, detail, written):
             )
         )
     if not suspect_rows:
-        suspect_rows.append(_empty_row(6, "No suspect documents."))
+        suspect_rows.append(_empty_row(6, text(lang, "report_no_suspects")))
 
     review_rows = []
     for row in detail["reviews"]:
         review_rows.append(
             "<tr><td>%s</td><td>%s</td><td>%s</td><td class='num'>%s</td><td>%s</td></tr>"
             % (
-                _esc(row["date"]),
+                _esc(show_date(lang, row["date"])),
                 _esc(row["entity"]),
                 _esc(row["number"]),
                 _esc(row["total"]),
@@ -727,14 +752,14 @@ def _render_html(figures, detail, written):
             )
         )
     if not review_rows:
-        review_rows.append(_empty_row(5, "No documents waiting for review."))
+        review_rows.append(_empty_row(5, text(lang, "report_no_reviews")))
 
     credit_rows = []
     for row in detail["credits"]:
         credit_rows.append(
             "<tr><td>%s</td><td>%s</td><td>%s</td><td class='num'>%s</td><td class='num'>%s</td><td class='num'>%s</td><td>%s</td></tr>"
             % (
-                _esc(row.get("date") or ""),
+                _esc(show_date(lang, row.get("date") or "")),
                 _esc(row.get("credit_note") or ""),
                 _esc(row.get("invoice") or ""),
                 _esc(row.get("invoice_total") or ""),
@@ -744,198 +769,224 @@ def _render_html(figures, detail, written):
             )
         )
     if not credit_rows:
-        credit_rows.append(_empty_row(7, "No credit note has been deducted from an invoice."))
+        credit_rows.append(_empty_row(7, text(lang, "report_no_credits")))
 
     due_rows = []
     for row in detail["dues"]:
         due_rows.append(
             "<tr><td>%s</td><td>%s</td><td>%s</td><td class='num'>%s</td></tr>"
-            % (_esc(row["due"]), _esc(row["number"]), _esc(row["entity"]), _esc(row["total"]))
+            % (_esc(show_date(lang, row["due"])), _esc(row["number"]), _esc(row["entity"]), _esc(row["total"]))
         )
     if not due_rows:
-        due_rows.append(_empty_row(4, "No document is due in the next 30 days."))
+        due_rows.append(_empty_row(4, text(lang, "report_no_due")))
 
-    vat_label = "VAT to pay"
+    vat_label = text(lang, "report_vat_pay")
     vat_value = figures.get("vat_to_pay")
     if figures.get("vat_to_recover"):
-        vat_label = "VAT to recover"
+        vat_label = text(lang, "report_vat_recover")
         vat_value = figures.get("vat_to_recover")
     if vat_value is None:
         vat_value = "—"
 
+
+    recon = text(
+        lang,
+        "report_recon_line",
+        linked=figures.get("bank_lines_linked"),
+        total=figures.get("bank_lines_total"),
+        links=detail["link_rows"],
+    )
+    due_note = text(lang, "report_due_note", start=generated)
     sheets = """
+<p class="print-bar no-print"><button type="button" id="print-report">%s</button></p>
 <section class="sheet">
-  <p class="kicker">Monthly report</p>
+  <p class="kicker">%s</p>
   <h1>%s</h1>
-  <p class="meta">%s · %s · Generated %s</p>
-  <h2>Executive summary</h2>
+  <p class="quiet">%s · %s · %s</p>
+  <h2>%s</h2>
   <div class="summary-layout">
     <div>
       %s
-      <p class="footer">Figures computed by code; text written by AI</p>
+      <p class="footer-note">%s</p>
     </div>
     <aside>
-      <h3>Figures used in this summary</h3>
-      <table class="figures"><tbody>%s</tbody></table>
+      <h3>%s</h3>
+      <div class="table-wrap"><table class="figures"><tbody>%s</tbody></table></div>
     </aside>
   </div>
 </section>
 <section class="sheet">
-  <p class="running">%s</p>
-  <h2>Key figures</h2>
-  <p class="note">%s</p>
+  <p class="quiet">%s</p>
+  <h2>%s</h2>
+  <p class="quiet">%s</p>
   <dl class="keys">
-    <div><dt>Revenue</dt><dd>%s</dd></div>
-    <div><dt>Expenses</dt><dd>%s</dd></div>
     <div><dt>%s</dt><dd>%s</dd></div>
-    <div><dt>Bank balance start</dt><dd>%s</dd></div>
-    <div><dt>Bank balance end</dt><dd>%s</dd></div>
+    <div><dt>%s</dt><dd>%s</dd></div>
+    <div><dt>%s</dt><dd>%s</dd></div>
+    <div><dt>%s</dt><dd>%s</dd></div>
+    <div><dt>%s</dt><dd>%s</dd></div>
   </dl>
-  <h3>Expenses by category</h3>
-  %s
+  <h3>%s</h3>
+  <div class="table-wrap">%s</div>
 </section>
 <section class="sheet">
-  <p class="running">%s</p>
-  <h2>Reconciliation</h2>
-  <p>%s of %s bank lines have supporting documents. %s link rows.</p>
-  <h3>Methods</h3>
-  %s
-  <h3>Unsupported lines</h3>
-  %s
+  <p class="quiet">%s</p>
+  <h2>%s</h2>
+  <p>%s</p>
+  <h3>%s</h3>
+  <div class="table-wrap">%s</div>
+  <h3>%s</h3>
+  <div class="table-wrap">%s</div>
 </section>
 <section class="sheet">
-  <p class="running">%s</p>
-  <h2>Pending items</h2>
-  <h3>Open</h3>
-  %s
-  <h3>Accepted by the owner</h3>
-  %s
-  <h3>Resolved after close</h3>
-  %s
+  <p class="quiet">%s</p>
+  <h2>%s</h2>
+  <h3>%s</h3>
+  <div class="table-wrap">%s</div>
+  <h3>%s</h3>
+  <div class="table-wrap">%s</div>
+  <h3>%s</h3>
+  <div class="table-wrap">%s</div>
+</section>
+<section class="sheet" id="alerts">
+  <p class="quiet">%s</p>
+  <h2>%s</h2>
+  <h3>%s</h3>
+  <div class="table-wrap">%s</div>
+  <h3>%s</h3>
+  <div class="table-wrap">%s</div>
+  <h3 id="reviews">%s</h3>
+  <div class="table-wrap">%s</div>
 </section>
 <section class="sheet">
-  <p class="running">%s</p>
-  <h2>Alerts</h2>
-  <h3>Suspect documents</h3>
-  %s
-  <h3>Credit notes applied</h3>
-  %s
-  <h3>Documents to review</h3>
-  %s
-</section>
-<section class="sheet">
-  <p class="running">%s</p>
-  <h2>Due in the next 30 days</h2>
-  <p class="note">Due dates printed on documents of this month, from %s through the following 30 days.</p>
-  %s
+  <p class="quiet">%s</p>
+  <h2>%s</h2>
+  <p class="quiet">%s</p>
+  <div class="table-wrap">%s</div>
 </section>
 """ % (
+        _esc(text(lang, "report_print")),
+        _esc(text(lang, "report_kicker")),
         _esc(company),
         _esc(title),
         _esc(status),
-        _esc(generated),
+        _esc(text(lang, "report_generated", date=generated)),
+        _esc(text(lang, "report_summary")),
         "".join(summary_bits),
+        _esc(text(lang, "report_ai_note")),
+        _esc(text(lang, "report_figures_used")),
         "".join(figure_html),
         _esc(running),
-        _esc(_FIGURE_NOTE),
+        _esc(text(lang, "report_key")),
+        _esc(text(lang, "report_figure_note")),
+        _esc(text(lang, "report_revenue")),
         _esc(figures.get("revenue_net")),
+        _esc(text(lang, "report_expenses")),
         _esc(figures.get("expenses_net")),
         _esc(vat_label),
         _esc(vat_value),
+        _esc(text(lang, "report_bank_start")),
         _esc(figures.get("bank_balance_start") if figures.get("bank_balance_start") is not None else "—"),
+        _esc(text(lang, "report_bank_end")),
         _esc(figures.get("bank_balance_end") if figures.get("bank_balance_end") is not None else "—"),
-        _table(["Category", "Type", "Amount (net)"], "".join(category_rows)),
-        _esc(running),
-        _esc(figures.get("bank_lines_linked")),
-        _esc(figures.get("bank_lines_total")),
-        _esc(detail["link_rows"]),
-        _table(["Method", "Links"], "".join(method_rows)),
-        _table(["Line", "Date", "Amount", "Description"], "".join(unsupported_rows)),
-        _esc(running),
-        _table(["Kind", "Item", "Amount"], open_body),
+        _esc(text(lang, "report_by_category")),
         _table(
-            ["Kind", "Item", "Amount", "Reason", "Approved by", "Date"],
+            [text(lang, "th_category"), text(lang, "th_type"), text(lang, "th_amount")],
+            "".join(category_rows),
+        ),
+        _esc(running),
+        _esc(text(lang, "report_recon")),
+        _esc(recon),
+        _esc(text(lang, "report_methods")),
+        _table([text(lang, "th_method"), text(lang, "th_links")], "".join(method_rows)),
+        _esc(text(lang, "report_unsupported")),
+        _table(
+            [
+                text(lang, "th_line"),
+                text(lang, "th_date"),
+                text(lang, "th_amount"),
+                text(lang, "th_description"),
+            ],
+            "".join(unsupported_rows),
+        ),
+        _esc(running),
+        _esc(text(lang, "report_pending")),
+        _esc(text(lang, "report_open")),
+        _table(
+            [text(lang, "th_kind"), text(lang, "th_item"), text(lang, "th_amount")],
+            open_body,
+        ),
+        _esc(text(lang, "report_accepted")),
+        _table(
+            [
+                text(lang, "th_kind"),
+                text(lang, "th_item"),
+                text(lang, "th_amount"),
+                text(lang, "th_reason"),
+                text(lang, "th_approved"),
+                text(lang, "th_date"),
+            ],
             accepted_body,
         ),
-        _table(["Date", "Document", "Amount", "Item"], "".join(resolved_rows)),
-        _esc(running),
+        _esc(text(lang, "report_resolved_after")),
         _table(
-            ["Date", "Counterparty", "Number", "Total", "Signals", "Why"],
+            [
+                text(lang, "th_date"),
+                text(lang, "th_document"),
+                text(lang, "th_amount"),
+                text(lang, "th_item"),
+            ],
+            "".join(resolved_rows),
+        ),
+        _esc(running),
+        _esc(text(lang, "report_alerts")),
+        _esc(text(lang, "report_suspects")),
+        _table(
+            [
+                text(lang, "th_date"),
+                text(lang, "th_counterparty"),
+                text(lang, "th_number"),
+                text(lang, "th_total"),
+                text(lang, "th_signals"),
+                text(lang, "th_why"),
+            ],
             "".join(suspect_rows),
         ),
+        _esc(text(lang, "report_credits")),
         _table(
-            ["Date", "Credit note", "Invoice", "Invoice total", "Credit", "Payable", "Issuer"],
+            [
+                text(lang, "th_date"),
+                text(lang, "th_credit"),
+                text(lang, "th_invoice"),
+                text(lang, "th_invoice_total"),
+                text(lang, "th_credit_amount"),
+                text(lang, "th_payable"),
+                text(lang, "th_issuer"),
+            ],
             "".join(credit_rows),
         ),
+        _esc(text(lang, "report_reviews")),
         _table(
-            ["Date", "Counterparty", "Number", "Total", "Why"],
+            [
+                text(lang, "th_date"),
+                text(lang, "th_counterparty"),
+                text(lang, "th_number"),
+                text(lang, "th_total"),
+                text(lang, "th_why"),
+            ],
             "".join(review_rows),
         ),
         _esc(running),
-        _esc(_long_date(detail["generated"])),
-        _table(["Due", "Number", "Counterparty", "Total"], "".join(due_rows)),
+        _esc(text(lang, "report_due")),
+        _esc(due_note),
+        _table(
+            [
+                text(lang, "th_due"),
+                text(lang, "th_number"),
+                text(lang, "th_counterparty"),
+                text(lang, "th_total"),
+            ],
+            "".join(due_rows),
+        ),
     )
-
-    return """<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>%s — %s</title>
-<style>
-  :root { color-scheme: light; }
-  * { box-sizing: border-box; }
-  body { margin: 0; background: #e7e2d8; color: #1c1917; font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif; }
-  .toolbar { max-width: 52rem; margin: 0 auto; padding: 16px 16px 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-  .toolbar a { color: #1d4e4a; font-weight: 650; }
-  main { max-width: 52rem; margin: 0 auto; padding: 16px; }
-  .sheet { background: white; padding: 28px 32px 36px; margin: 0 0 16px; box-shadow: 0 1px 2px rgba(0,0,0,.06); }
-  h1 { font-size: 1.8rem; margin: 0 0 4px; }
-  h2 { font-size: 1.25rem; margin: 0 0 12px; }
-  h3 { font-size: 1rem; margin: 18px 0 8px; }
-  p { line-height: 1.45; margin: 0 0 10px; }
-  .kicker { letter-spacing: .08em; text-transform: uppercase; font-size: .75rem; margin: 0 0 8px; color: #57534e; }
-  .meta, .running, .note, .footer, .confidence { color: #44403c; font-size: .92rem; }
-  .footer { margin-top: 16px; font-style: italic; }
-  .summary-layout { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, .9fr); gap: 20px; align-items: start; }
-  .summary-layout > * { min-width: 0; }
-  aside h3 { margin-top: 0; }
-  table { width: 100%%; border-collapse: collapse; font-size: .92rem; }
-  th, td { text-align: left; vertical-align: top; padding: 5px 6px; border-bottom: 1px solid #e7e5e4; overflow-wrap: anywhere; }
-  td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
-  table.figures { table-layout: fixed; }
-  table.figures td { text-align: right; font-variant-numeric: tabular-nums; }
-  table.figures th { font-weight: 600; width: 62%%; white-space: normal; }
-  .keys { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 16px; margin: 0 0 8px; }
-  .keys div { border-top: 2px solid #1d4e4a; padding-top: 6px; }
-  .keys dt { font-size: .78rem; letter-spacing: .04em; text-transform: uppercase; color: #57534e; }
-  .keys dd { margin: 2px 0 0; font-size: 1.25rem; }
-  @media (max-width: 720px) {
-    .sheet { padding: 18px 14px 24px; }
-    .summary-layout, .keys { grid-template-columns: 1fr; }
-  }
-  @page { size: A4; margin: 14mm; }
-  @media print {
-    body { background: white; }
-    .toolbar { display: none; }
-    main { max-width: none; padding: 0; }
-    .sheet { box-shadow: none; margin: 0; padding: 0; page-break-after: always; break-after: page; }
-    .sheet:last-child { page-break-after: auto; break-after: auto; }
-    .summary-layout { grid-template-columns: 1.15fr .85fr; }
-    a { color: inherit; text-decoration: none; }
-  }
-</style>
-</head>
-<body>
-<p class="toolbar"><a href="/?month=%s">Back to the dashboard</a></p>
-<main>
-%s
-</main>
-</body>
-</html>
-""" % (
-        _esc(company),
-        _esc(title),
-        _esc(month),
-        sheets,
-    )
+    return sheets

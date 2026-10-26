@@ -7,3 +7,4 @@ __pycache__/
 *.db
 data/uploads/
 data/cache/
+data/screenshots/

@@ -6,6 +6,7 @@ import json
 import logging
 import re
 import sys
+import time
 from datetime import date, timedelta
 from decimal import InvalidOperation
 from pathlib import Path
@@ -2274,12 +2275,29 @@ def _file_processed_documents(session, results):
         logger.error("drive upload after scan failed")
 
 
-def process_scan_bytes(session, data, filename, note, categories):
-    # type: (Session, bytes, str, str, list) -> List[Dict[str, Any]]
+def _scan_phase(name, on_step):
+    # type: (str, Optional[Any]) -> float
+    if on_step is not None:
+        on_step(name)
+    logger.info("scan step %s", name)
+    print("scan step %s" % name, flush=True)
+    return time.perf_counter()
+
+
+def _scan_took(name, started):
+    # type: (str, float) -> None
+    seconds = time.perf_counter() - started
+    logger.info("scan step %s %.3fs", name, seconds)
+    print("scan step %s %.3fs" % (name, seconds), flush=True)
+
+
+def process_scan_bytes(session, data, filename, note, categories, on_step=None):
+    # type: (Session, bytes, str, str, list, Optional[Any]) -> List[Dict[str, Any]]
     """Process one scanned PDF or photo: no sender and no email body.
 
     `note` is optional text the owner typed with the scan. It is the only context.
     Photos are read by the vision model, then validated like an email attachment.
+    `on_step` receives reading, validating and matching while the work runs.
     """
     from app.llm import file_cache
 
@@ -2298,6 +2316,7 @@ def process_scan_bytes(session, data, filename, note, categories):
     content_type = "application/pdf"
     rule_text = ""
     with file_cache(data):
+        started = _scan_phase("reading", on_step)
         if _is_image(safe_name, data):
             from app.extract import extract_image_document, extraction_text
 
@@ -2309,6 +2328,9 @@ def process_scan_bytes(session, data, filename, note, categories):
             prepared = (rule_text, extracted)
         else:
             rule_text = pdf_text(data)
+        _scan_took("reading", started)
+
+        started = _scan_phase("validating", on_step)
         attachment = Attachment(
             filename=safe_name,
             content_type=content_type,
@@ -2327,13 +2349,17 @@ def process_scan_bytes(session, data, filename, note, categories):
             item["email"] = "scan:%s" % safe_name
         finalize_documents(session)
         _patch_duplicate_results(session, results)
+        _scan_took("validating", started)
+
+        started = _scan_phase("matching", on_step)
         from app.pending import attach_late_results
 
         attach_late_results(session, results, message)
         from app.receipts import apply_receipt_rules
 
         apply_receipt_rules(session, results, rule_text, note or "")
-    _file_processed_documents(session, results)
+        _file_processed_documents(session, results)
+        _scan_took("matching", started)
     return results
 
 

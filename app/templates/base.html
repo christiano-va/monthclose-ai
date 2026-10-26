@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="__HTML_LANG__" data-lang="__LANG__">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TITLE__</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<header class="site-header">
+  <div class="brand-row">
+    <div class="brand">
+      <p class="company">__COMPANY__</p>
+      <p class="product">MonthClose</p>
+    </div>
+    <div class="header-tools">
+      <label class="month-picker" for="month">
+        <span>__MONTH_LABEL__</span>
+        <select id="month" name="month" data-month-nav="__MONTH_NAV__" data-lang="__LANG__">
+          __MONTH_OPTIONS__
+        </select>
+      </label>
+      <nav class="lang" aria-label="__LANG_LABEL__">
+        <a href="__LANG_PT_HREF__" class="__LANG_PT_CLASS__" hreflang="pt-PT" __LANG_PT_CURRENT__>PT</a>
+        <a href="__LANG_EN_HREF__" class="__LANG_EN_CLASS__" hreflang="en" __LANG_EN_CURRENT__>EN</a>
+      </nav>
+    </div>
+  </div>
+  <nav class="topnav" aria-label="__NAV_LABEL__">
+    __TOPNAV__
+  </nav>
+</header>
+<main id="content" class="__MAIN_CLASS__">
+__CONTENT__
+</main>
+<nav class="tabbar" aria-label="__NAV_LABEL__">
+  __TABBAR__
+</nav>
+<script src="/static/app.js"></script>
+</body>
+</html>

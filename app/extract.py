@@ -294,25 +294,41 @@ def extraction_text(extracted):
 
 def extract_image_document(image_bytes, message, categories, mime="image/jpeg"):
     # type: (bytes, MailMessage, List[Category], str) -> Dict[str, Any]
-    """Extract the same schema from a photo. A NIF that is not printed stays null."""
+    """Extract the same schema from a photo. A NIF that is not printed stays null.
+
+    The instruction is short on purpose: the scan is waiting on this call.
+    The schema still lists every field, and code checks the arithmetic afterwards.
+    """
     if categories is None:
         categories = []
-    prompt_parts = _extraction_lines(
-        message, "Extract the accounting document from this photograph."
-    )
-    prompt_parts.extend(
+    our_nif = company_nif()
+    note = (message.body or "").strip()
+    prompt = "\n".join(
         [
-            "The image is the only source of the figures and the tax ids.",
-            "If a NIF is not printed on the page, leave that NIF field null.",
-            "Do not copy the company NIF from these instructions onto the document.",
-            "description includes the payment method as printed, such as numerario, dinheiro, multibanco or cartao.",
+            "Read this photo of one Portuguese accounting document.",
+            "The company is Nortavia Digital, NIF %s." % our_nif,
+            "Copy only figures and tax ids that are printed.",
+            "If a NIF is not printed, leave it null. Do not invent %s." % our_nif,
+            "issuer is who issued the document. recipient is who it is addressed to.",
+            "On a purchase the issuer is the supplier. On a sale issued by Nortavia the issuer NIF is %s."
+            % our_nif,
+            "document_kind is one of: invoice, receipt, payslip, tax_guide, payment_proof, payment_notice, bank_statement, payout_report, other.",
+            "document_type is a short label such as fatura, fatura-recibo, recibo, talão or extrato.",
+            "Money is a string with two decimals, for example 12.30. Dates are YYYY-MM-DD.",
+            "lines: each line total includes that line's VAT. vat_rate is 0, 6, 13 or 23.",
+            "description includes the payment method if it is printed (numerario, dinheiro, multibanco, cartao).",
+            "suggested_category and conta_snc are null.",
+            "confidence is 0 to 1. justification is one line.",
+            "risk_flags is empty unless the page shows a new IBAN, urgency, a very short deadline, or payment to a private account.",
+            "Owner note: %s" % (note or "(none)"),
         ]
     )
     return llm_json(
-        "\n".join(prompt_parts),
+        prompt,
         EXTRACT_SCHEMA,
         image=image_bytes,
         image_mime=mime,
+        reasoning_effort="low",
     )
 
 

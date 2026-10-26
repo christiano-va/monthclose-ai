@@ -5,6 +5,7 @@ from typing import List, Optional
 
 from fastapi import Body, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from sqlmodel import Session, select
 
 from app.db import ROOT, get_session, init_db
@@ -25,8 +26,10 @@ from app.models import (
 from app.pending import credit_applications_for_month, resolved_after_close
 from app.money import ZERO, money_equal, money_or_unknown, to_money
 from app.posting import excluded_from_linking, note_value
-from app.home import render_home
+from app.home import document_due, render_home
+from app.pending_view import render_pending
 from app.report import document_is_suspect, render_monthly_report
+from app.ui import html_response, prefers_html, resolve_lang, selected_month
 from app.phone import router as phone_router
 from app.statements import import_statement_text
 from app.sync import SyncError, run_sync, sync_status
@@ -37,6 +40,7 @@ BLOCKING_KINDS = ("missing_document", "missing_sales_invoice")
 MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
 
 app = FastAPI(title="MonthClose AI", version="0.1.0")
+app.mount("/static", StaticFiles(directory=str(ROOT / "app" / "static")), name="static")
 app.include_router(phone_router)
 
 
@@ -206,39 +210,9 @@ def period_gaps(session, month):
     return bank_lines, unsupported, blocking, accepted
 
 
-def _prefers_html(request):
-    # type: (Request) -> bool
-    accept = request.headers.get("accept") or ""
-    if "text/html" not in accept:
-        return False
-    html_at = accept.find("text/html")
-    json_at = accept.find("application/json")
-    if json_at == -1:
-        return True
-    return html_at < json_at
-
-
-def _default_dashboard_month(session, months):
-    # type: (Session, List[str]) -> str
-    line = session.exec(
-        select(BankLine).order_by(BankLine.period.desc(), BankLine.id.desc())
-    ).first()
-    if line is not None and line.period:
-        return line.period
-    if months:
-        return months[0]
-    return date.today().strftime("%Y-%m")
-
-
 def _dashboard_payload(session, requested):
     # type: (Session, Optional[str]) -> dict
-    periods = session.exec(select(Period).order_by(Period.month.desc())).all()
-    months = [row.month for row in periods]
-    selected = requested if requested and MONTH_RE.match(requested) else None
-    if selected is None:
-        selected = _default_dashboard_month(session, months)
-    if selected not in months:
-        months = [selected] + months
+    selected, months = selected_month(session, requested)
     checklist = period_checklist(selected, session)
     documents = session.exec(select(Document).where(Document.period == selected)).all()
     categories = {}
@@ -257,6 +231,9 @@ def _dashboard_payload(session, requested):
         elif document.status == "review":
             review += 1
     pending = []
+    dues = []
+    today = date.today()
+    horizon = today.toordinal() + 30
     rows = session.exec(
         select(OpenItem)
         .where(OpenItem.period == selected, OpenItem.status == "open")
@@ -271,6 +248,19 @@ def _dashboard_payload(session, requested):
                 "due": item.due_date.isoformat() if item.due_date else "",
             }
         )
+    for document in documents:
+        due = document_due(document)
+        if due is None or document.status == "duplicate" or due < today:
+            continue
+        if due.toordinal() > horizon:
+            continue
+        dues.append(
+            {
+                "due": due.isoformat(),
+                "label": document.entity,
+                "amount": money_or_unknown(document.total),
+            }
+        )
     return {
         "month": selected,
         "months": months,
@@ -280,6 +270,7 @@ def _dashboard_payload(session, requested):
         "review": review,
         "suspect": suspect,
         "pending": pending,
+        "dues": dues,
         "sync": sync_status(),
     }
 
@@ -290,8 +281,9 @@ def root(
     month: Optional[str] = Query(default=None),
     session: Session = Depends(get_session),
 ):
-    if _prefers_html(request):
-        return HTMLResponse(render_home(_dashboard_payload(session, month)))
+    if prefers_html(request):
+        lang = resolve_lang(request)
+        return html_response(render_home(_dashboard_payload(session, month), lang), lang)
     return {"name": "MonthClose AI", "docs": "/docs"}
 
 
@@ -643,11 +635,28 @@ def close_period(
     }
 
 
+@app.get("/pending", response_class=HTMLResponse)
+def pending_page(
+    request: Request,
+    month: Optional[str] = Query(default=None),
+    session: Session = Depends(get_session),
+):
+    lang = resolve_lang(request)
+    selected, months = selected_month(session, month)
+    return html_response(render_pending(session, selected, months, lang), lang)
+
+
 @app.get("/report/{month}/view", response_class=HTMLResponse)
-def monthly_report_view(month: str, session: Session = Depends(get_session)):
+def monthly_report_view(
+    month: str,
+    request: Request,
+    session: Session = Depends(get_session),
+):
     """Printable monthly report. Figures are computed in code; the model writes the summary."""
     require_month(month)
-    return HTMLResponse(render_monthly_report(session, month))
+    lang = resolve_lang(request)
+    _selected, months = selected_month(session, month)
+    return html_response(render_monthly_report(session, month, lang, months), lang)
 
 
 @app.get("/reports/{month}")

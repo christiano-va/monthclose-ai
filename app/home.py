@@ -1,200 +1,259 @@
 """Browser dashboard. The JSON service root stays available for API clients."""
-import html
+from datetime import date, timedelta
 from typing import Any, Dict, List
 
+from app.i18n import text
+from app.posting import note_value
+from app.ui import (
+    chip,
+    esc,
+    month_status_label,
+    month_title,
+    page_href,
+    parse_note_date,
+    render_page,
+    show_amount,
+    show_date,
+)
 
-def _esc(value):
-    # type: (object) -> str
-    return html.escape("" if value is None else str(value), quote=True)
+
+def _sync_line(lang, sync):
+    # type: (str, Dict[str, Any]) -> str
+    if sync.get("running"):
+        return text(lang, "dash_sync_running")
+    last = sync.get("last") or {}
+    if not isinstance(last, dict):
+        return text(lang, "dash_sync_none")
+    finished = last.get("finished_at") or ""
+    error = last.get("error") or ""
+    if finished and error:
+        return text(lang, "dash_sync_last_error", when=finished, error=error)
+    if finished:
+        return text(lang, "dash_sync_last", when=finished)
+    return text(lang, "dash_sync_none")
 
 
-def render_home(payload):
-    # type: (Dict[str, Any]) -> str
-    month = payload["month"]
-    options = []  # type: List[str]
-    for name in payload["months"]:
-        selected = " selected" if name == month else ""
-        options.append("<option value='%s'%s>%s</option>" % (_esc(name), selected, _esc(name)))
-    if not options:
-        options.append("<option value='%s' selected>%s</option>" % (_esc(month), _esc(month)))
-
-    checklist = payload["checklist"]
-    status = checklist.get("status") or "missing"
-    badge = status.replace("_", " ")
-    blockers = []
-    for text in checklist.get("blockers") or []:
-        if text == "period is already closed":
+def _due_rows(lang, payload):
+    # type: (str, Dict[str, Any]) -> List[Dict[str, str]]
+    today = date.today()
+    horizon = today + timedelta(days=30)
+    found = []  # type: List[Dict[str, str]]
+    seen = set()
+    for item in payload.get("pending") or []:
+        due = parse_note_date(item.get("due"))
+        if due is None or due < today or due > horizon:
             continue
-        blockers.append("<li>%s</li>" % _esc(text))
-    if status == "closed":
-        close_line = "This month is closed."
-    elif checklist.get("can_close"):
-        close_line = "The close checklist is clear."
-    elif blockers:
-        close_line = "The month stays open until these are resolved or accepted."
-    else:
-        close_line = "The month is open."
+        label = item.get("description") or ""
+        key = (due.isoformat(), label)
+        if key in seen:
+            continue
+        seen.add(key)
+        found.append(
+            {
+                "due": due.isoformat(),
+                "label": label,
+                "amount": show_amount(lang, item.get("amount")),
+            }
+        )
+    for row in payload.get("dues") or []:
+        due = parse_note_date(row.get("due"))
+        if due is None or due < today or due > horizon:
+            continue
+        label = row.get("label") or ""
+        key = (due.isoformat(), label)
+        if key in seen:
+            continue
+        seen.add(key)
+        found.append(
+            {
+                "due": due.isoformat(),
+                "label": label,
+                "amount": show_amount(lang, row.get("amount")),
+            }
+        )
+    found.sort(key=lambda row: (row["due"], row["label"]))
+    return found[:5]
 
-    blocker_html = ""
-    if blockers and status != "closed":
-        blocker_html = "<ul>%s</ul>" % "".join(blockers)
 
-    pending_rows = []
-    for item in payload["pending"]:
-        due = item.get("due") or ""
-        due_html = " · due %s" % _esc(due) if due else ""
-        pending_rows.append(
-            "<li><span>%s</span> <strong>%s</strong>%s<p>%s</p></li>"
-            % (
-                _esc(item.get("kind")),
-                _esc(item.get("amount")),
-                due_html,
-                _esc(item.get("description")),
+def _checklist_items(lang, checklist):
+    # type: (str, Dict[str, Any]) -> List[str]
+    lines = []  # type: List[str]
+    grouped = checklist.get("blockers_by_kind") or {}
+    for row in grouped.get("unsupported_bank_line") or []:
+        lines.append(
+            text(
+                lang,
+                "dash_line_item",
+                date=show_date(lang, row.get("date")),
+                amount=show_amount(lang, row.get("amount")),
+                description=row.get("description") or "",
             )
         )
-    if pending_rows:
-        pending_html = "<ul class='pending'>%s</ul>" % "".join(pending_rows)
-    else:
-        pending_html = "<p>No open pending items for this month.</p>"
+    for kind in ("missing_document", "missing_sales_invoice"):
+        for row in grouped.get(kind) or []:
+            lines.append(
+                text(
+                    lang,
+                    "dash_task_item",
+                    amount=show_amount(lang, row.get("amount")),
+                    description=row.get("item") or "",
+                )
+            )
+    return lines[:6]
 
-    sync = payload.get("sync") or {}
-    if sync.get("running"):
-        sync_line = "A sync is running."
-    else:
-        last = sync.get("last") or {}
-        finished = last.get("finished_at") if isinstance(last, dict) else ""
-        error = last.get("error") if isinstance(last, dict) else ""
-        if finished and error:
-            sync_line = "Last sync %s (%s)." % (finished, error)
-        elif finished:
-            sync_line = "Last sync %s." % finished
-        else:
-            sync_line = "No sync yet."
 
-    counters = (
-        ("Documents", payload["documents"]),
-        ("Validated", payload["validated"]),
-        ("Review", payload["review"]),
-        ("Suspect", payload["suspect"]),
-    )
-    counter_html = []
-    for label, value in counters:
-        counter_html.append(
-            "<div><span>%s</span><strong>%s</strong></div>" % (_esc(label), _esc(value))
+def render_home(payload, lang):
+    # type: (Dict[str, Any], str) -> str
+    month = payload["month"]
+    checklist = payload["checklist"]
+    status = checklist.get("status") or "missing"
+    pending_count = len(payload.get("pending") or [])
+    review = payload.get("review") or 0
+    suspect = payload.get("suspect") or 0
+    report_href = "/report/%s/view?lang=%s" % (month, lang)
+    pending_href = page_href("/pending", month, lang)
+    scan_href = page_href("/scan", month, lang)
+
+    dues = _due_rows(lang, payload)
+    if dues:
+        due_html = "<ul class='dues'>%s</ul>" % "".join(
+            "<li><strong>%s</strong> · %s<p>%s</p></li>"
+            % (esc(show_date(lang, row["due"])), esc(row["amount"]), esc(row["label"]))
+            for row in dues
+        )
+    else:
+        due_html = "<p class='quiet'>%s</p>" % esc(text(lang, "dash_dues_empty"))
+
+    clear_html = ""
+    if pending_count == 0 and review == 0 and suspect == 0:
+        clear_html = "<p>%s</p>" % esc(text(lang, "dash_clear"))
+
+    if status == "closed":
+        close_line = text(lang, "dash_closed")
+    elif checklist.get("can_close"):
+        close_line = text(lang, "dash_can_close")
+    elif _checklist_items(lang, checklist):
+        close_line = text(lang, "dash_blocked")
+    else:
+        close_line = text(lang, "dash_open")
+
+    list_html = ""
+    if status != "closed":
+        items = _checklist_items(lang, checklist)
+        if items:
+            list_html = "<ul class='checklist'>%s</ul>" % "".join(
+                "<li>%s</li>" % esc(item) for item in items
+            )
+
+    close_button = ""
+    if checklist.get("can_close") and status == "open":
+        close_button = (
+            "<button type='button' id='close-month' data-url='/periods/%s/close' "
+            "data-closing='%s' data-failed='%s'>%s</button>"
+            "<p id='close-status' class='quiet'></p>"
+            % (
+                esc(month),
+                esc(text(lang, "dash_closing")),
+                esc(text(lang, "dash_close_failed")),
+                esc(text(lang, "dash_close")),
+            )
         )
 
-    return """<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>MonthClose AI</title>
-<style>
-  body { margin: 0; padding: 16px; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f4f1ea; color: #1c1917; }
-  main { max-width: 40rem; margin: 0 auto; }
-  h1 { font-size: 1.7rem; margin: 0 0 4px; }
-  h2 { font-size: 1.05rem; margin: 0 0 8px; }
-  p, li { line-height: 1.45; }
-  a { color: #1d4e4a; }
-  form label { display: block; font-size: .85rem; font-weight: 650; margin-bottom: 6px; }
-  select { width: 100%%; min-height: 48px; font-size: 1rem; padding: 8px 12px; border-radius: 12px; border: 1px solid #d6d3d1; background: white; }
-  section { background: white; border-radius: 16px; padding: 16px; margin-top: 12px; }
-  .status { display: inline-block; padding: 4px 10px; border-radius: 999px; background: #e7f0ee; color: #1d4e4a; font-weight: 700; text-transform: capitalize; }
-  .counters { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-  .counters div { background: #faf8f4; border-radius: 12px; padding: 12px; }
-  .counters span { display: block; font-size: .8rem; color: #57534e; }
-  .counters strong { font-size: 1.45rem; }
-  ul { padding-left: 18px; margin: 8px 0 0; }
-  .pending { list-style: none; padding: 0; }
-  .pending li { padding: 10px 0; border-top: 1px solid #e7e5e4; }
-  .pending li:first-child { border-top: 0; }
-  .pending span { display: inline-block; font-size: .75rem; letter-spacing: .03em; text-transform: uppercase; color: #57534e; }
-  .pending p { margin: 4px 0 0; }
-  .actions { display: grid; gap: 8px; }
-  .actions a, button { display: block; text-align: center; text-decoration: none; padding: 14px 18px; font-size: 1.05rem; font-weight: 700; border-radius: 12px; }
-  .actions a { background: white; color: #1d4e4a; border: 1px solid #1d4e4a; }
-  button { color: white; background: #1d4e4a; border: 0; cursor: pointer; width: 100%%; }
-  button:disabled { opacity: 0.6; cursor: wait; }
-  .quiet { color: #57534e; font-size: .9rem; }
-  @media (min-width: 720px) {
-    .counters { grid-template-columns: repeat(4, 1fr); }
-    .actions { grid-template-columns: 1fr 1fr; }
-    .actions button { grid-column: 1 / -1; }
-  }
-</style>
-</head>
-<body>
-<main>
-  <h1>MonthClose AI</h1>
-  <p class="quiet">Close the month. Nothing is sent until you send it yourself.</p>
-  <section>
-    <form method="get" action="/">
-      <label for="month">Month</label>
-      <select id="month" name="month" onchange="this.form.submit()">
-        %s
-      </select>
-    </form>
-  </section>
-  <section>
-    <h2>Close checklist <span class="status">%s</span></h2>
-    <p>%s</p>
-    <p class="quiet">%s bank lines · %s without a document · %s open items</p>
-    %s
-  </section>
-  <section>
-    <h2>Documents</h2>
-    <div class="counters">%s</div>
-  </section>
-  <section>
-    <h2>Pending items</h2>
-    %s
-  </section>
-  <section class="actions">
-    <a href="/report/%s/view">Monthly report</a>
-    <a href="/scan">Phone scan</a>
-    <button id="sync" type="button">Sync now</button>
-    <p id="sync-status" class="quiet">%s</p>
-  </section>
-</main>
-<script>
-var button = document.getElementById("sync");
-var status = document.getElementById("sync-status");
-button.addEventListener("click", function () {
-  button.disabled = true;
-  status.textContent = "Syncing…";
-  fetch("/sync", {method: "POST", headers: {"Accept": "application/json"}})
-    .then(function (response) {
-      return response.json().then(function (body) {
-        return {ok: response.ok, body: body};
-      });
-    })
-    .then(function (result) {
-      if (!result.ok) {
-        var detail = result.body && result.body.detail ? result.body.detail : "Sync failed.";
-        status.textContent = typeof detail === "string" ? detail : "Sync failed.";
-        button.disabled = false;
-        return;
-      }
-      window.location.reload();
-    })
-    .catch(function () {
-      status.textContent = "Sync failed.";
-      button.disabled = false;
-    });
-});
-</script>
-</body>
-</html>
-""" % (
-        "".join(options),
-        _esc(badge),
-        _esc(close_line),
-        _esc(checklist.get("bank_lines")),
-        _esc(checklist.get("unsupported_bank_lines")),
-        _esc(checklist.get("open_items")),
-        blocker_html,
-        "".join(counter_html),
-        pending_html,
-        _esc(month),
-        _esc(sync_line),
+    empty_docs = ""
+    if not payload.get("documents"):
+        empty_docs = "<p class='quiet'>%s</p>" % esc(text(lang, "dash_no_documents"))
+
+    counts = text(
+        lang,
+        "dash_lines",
+        lines=checklist.get("bank_lines"),
+        missing=checklist.get("unsupported_bank_lines"),
+        open=checklist.get("open_items"),
     )
+
+    body = """
+<section class="attention">
+  <h1>%s</h1>
+  %s
+  <div class="stats">
+    <a class="stat" href="%s"><strong>%s</strong><span>%s</span></a>
+    <a class="stat" href="%s#reviews"><strong>%s</strong><span>%s</span></a>
+    <a class="stat" href="%s#alerts"><strong>%s</strong><span>%s</span></a>
+  </div>
+  <h2>%s</h2>
+  %s
+</section>
+<section class="card">
+  <h2>%s %s</h2>
+  <p>%s</p>
+  <p class="quiet">%s</p>
+  %s
+  %s
+  %s
+</section>
+<section class="card">
+  <h2>%s</h2>
+  <div class="actions">
+    <a class="btn" href="%s">%s</a>
+    <button type="button" id="sync" data-syncing="%s" data-failed="%s" data-offline="%s">%s</button>
+    <a class="btn btn-ghost span-2" href="%s">%s</a>
+  </div>
+  <p id="sync-status" class="quiet">%s</p>
+</section>
+""" % (
+        esc(text(lang, "dash_title")),
+        clear_html,
+        esc(pending_href),
+        esc(pending_count),
+        esc(text(lang, "dash_pending")),
+        esc(report_href),
+        esc(review),
+        esc(text(lang, "dash_review")),
+        esc(report_href),
+        esc(suspect),
+        esc(text(lang, "dash_suspect")),
+        esc(text(lang, "dash_dues")),
+        due_html,
+        esc(text(lang, "dash_month")),
+        chip(lang, "validated" if status == "closed" else "pending", ""),
+        esc(close_line),
+        esc(counts),
+        empty_docs,
+        list_html,
+        close_button,
+        esc(text(lang, "dash_quick")),
+        esc(scan_href),
+        esc(text(lang, "dash_scan")),
+        esc(text(lang, "dash_syncing")),
+        esc(text(lang, "dash_sync_failed")),
+        esc(text(lang, "error_offline")),
+        esc(text(lang, "dash_sync")),
+        esc(report_href),
+        esc(text(lang, "dash_report")),
+        esc(_sync_line(lang, payload.get("sync") or {})),
+    )
+    # The month chip should say Open or Closed, not Validated/Pending.
+    body = body.replace(
+        chip(lang, "validated" if status == "closed" else "pending", ""),
+        "<span class='chip chip-%s'>%s</span>"
+        % (
+            "resolved" if status == "closed" else "pending",
+            esc(month_status_label(lang, status if status in ("open", "closed") else "open")),
+        ),
+        1,
+    )
+    title = "%s — %s" % (month_title(lang, month), "MonthClose")
+    return render_page(
+        lang,
+        "dashboard",
+        month,
+        payload.get("months") or [month],
+        title,
+        body,
+        "/",
+    )
+
+
+def document_due(document):
+    # type: (object) -> object
+    return parse_note_date(note_value(document.notes, "due_date"))
