@@ -38,9 +38,18 @@ def _slug(value, limit=60):
     return text[:limit]
 
 
+def is_duplicate_copy(document):
+    # type: (Document) -> bool
+    """A second copy (2.ª via) is not filed as a normal document."""
+    return (document.status or "") == "duplicate"
+
+
 def drive_filename(document):
     # type: (Document) -> str
-    """Clear file name: date_entity_number.pdf (or the scan's image extension)."""
+    """Clear file name: date_entity_number.pdf (or the scan's image extension).
+
+    A duplicate copy gets the suffix _DUPLICATE so it is not a second normal file.
+    """
     if document.document_date is not None:
         stamp = document.document_date.isoformat()
     else:
@@ -48,12 +57,18 @@ def drive_filename(document):
     suffix = Path(document.original_filename or document.file_path or "").suffix.lower()
     if suffix not in _MIME:
         suffix = ".pdf"
-    return "%s_%s_%s%s" % (
+    name = "%s_%s_%s%s" % (
         stamp,
         _slug(document.entity),
         _slug(document.document_number),
         suffix,
     )
+    if not is_duplicate_copy(document):
+        return name
+    stem, dot, ext = name.rpartition(".")
+    if dot:
+        return "%s_DUPLICATE.%s" % (stem, ext)
+    return name + "_DUPLICATE"
 
 
 def _local_path(document):
@@ -98,6 +113,18 @@ class DriveStore:
         # type: (str) -> str
         name = period if _PERIOD_RE.match(period or "") else "undated"
         return self._folder(name, self.root_folder_id())
+
+    def duplicates_folder_id(self, period):
+        # type: (str) -> str
+        """Second copies live under the period, in a folder of their own."""
+        return self._folder("duplicates", self.period_folder_id(period))
+
+    def folder_for(self, document):
+        # type: (Document) -> str
+        period = document.period or ""
+        if is_duplicate_copy(document):
+            return self.duplicates_folder_id(period)
+        return self.period_folder_id(period)
 
     def _folder(self, name, parent_id):
         # type: (str, Optional[str]) -> str
@@ -165,7 +192,7 @@ class DriveStore:
         # type: (Document, Path) -> Optional[str]
         from googleapiclient.http import MediaFileUpload
 
-        folder_id = self.period_folder_id(document.period)
+        folder_id = self.folder_for(document)
         suffix = path.suffix.lower()
         media = MediaFileUpload(str(path), mimetype=_MIME.get(suffix, "application/pdf"), resumable=False)
         created = (

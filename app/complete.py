@@ -29,6 +29,7 @@ from app.posting import (
     TIPO_RECEITA,
     excluded_from_linking,
     find_referenced_invoices,
+    keeping_note,
     note_value,
 )
 
@@ -362,7 +363,7 @@ def _upsert_missing_sale(session, line, report, code, guest, gross):
         primary.period = line.period
         primary.document_id = report.id
         primary.assignee = "owner"
-        primary.notes = note_text
+        primary.notes = keeping_note(primary.notes, note_text, "gmail_draft_id")
         primary.confidence = 0.9
         primary.justification = (
             "Payout booking %s has no sales invoice in the mailbox." % code

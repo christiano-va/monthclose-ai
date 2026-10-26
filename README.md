@@ -33,7 +33,7 @@ source venv/bin/activate
 uvicorn app.main:app --reload
 ```
 
-Interactive docs are at `http://127.0.0.1:8000/docs`. A browser open on `http://127.0.0.1:8000/` shows a **Sync now** button. API clients that do not ask for HTML still receive the JSON service name.
+Interactive docs are at `http://127.0.0.1:8000/docs`. A browser open on `http://127.0.0.1:8000/` shows the dashboard: a month selector, the close checklist, document counters, pending items, and links to the monthly report and the phone scan, plus **Sync now**. API clients that do not ask for HTML still receive the JSON service name.
 
 ## Google Gmail and Drive
 
@@ -64,13 +64,13 @@ curl -X POST http://127.0.0.1:8000/sync
 
 Or use **Sync now** on the home page. `GET /sync/status` returns whether a sync is running and the last summary. The summary is counts.
 
-Drive: the app creates a folder named **MonthClose AI** and a subfolder per period (`YYYY-MM`). Each email attachment and each phone scan is uploaded as `date_entity_number.pdf` (photos keep their image extension). The link is stored on `document.drive_link`. A document that already has a link is not uploaded again. Nothing from Drive is written into the repository.
+Drive: the app creates a folder named **MonthClose AI** and a subfolder per period (`YYYY-MM`). Each email attachment and each phone scan is uploaded as `date_entity_number.pdf` (photos keep their image extension). A second copy (2.ª via) is not filed as another normal document: new uploads go in a `duplicates` subfolder of that period, and the file name ends with `_DUPLICATE`. Files already in Drive are left where they are. The link is stored on `document.drive_link`. A document that already has a link is not uploaded again. Nothing from Drive is written into the repository.
 
 Labels: `monthclose` and `monthclose-processed` are created if they are missing. After a message is processed, the app adds `monthclose-processed`, which takes it out of the default query.
 
-Owner drafts: open `missing_document` and `invoice_to_request` tasks become Gmail drafts addressed to `OWNER_EMAIL`. The app never calls send. A task that already has a draft is skipped.
+Owner drafts: open `missing_document`, `missing_sales_invoice` and `invoice_to_request` tasks become Gmail drafts addressed to `OWNER_EMAIL`. The draft asks the owner to find the document, to ask the supplier or the customer for a second copy, or to issue the invoice, and to reply with the file or send it through `/scan`. An unknown amount is written as “amount to be confirmed”. The app never calls send. A task that already has a draft is updated in place.
 
-Model replies stay cached by file hash under `data/cache/`, so a second sync does not call the model again for the same file.
+Model replies stay cached by file hash under `data/cache/`, so a second sync does not call the model again for the same file. The monthly-report summary is cached per month together with a hash of the figures, so reloading the report does not call the model again while those figures are unchanged.
 
 ## Phone scan
 
@@ -161,7 +161,8 @@ When an invoice arrives from an issuer that still has an unapplied credit note, 
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| `GET` | `/` | Service name, or the home page with **Sync now** when the client asks for HTML |
+| `GET` | `/` | Service name, or the dashboard when the client asks for HTML |
+| `GET` | `/report/{month}/view` | Printable monthly report. Figures are computed in code; the model writes the summary |
 | `POST` | `/sync` | Read Gmail, process, upload to Drive, link, and draft owner mail. Returns counts |
 | `GET` | `/sync/status` | Whether a sync is running, and the last summary |
 | `POST` | `/documents` | Store one document. `base + vat` must equal `total`. |

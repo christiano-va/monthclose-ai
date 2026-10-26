@@ -1,5 +1,5 @@
 import re
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import List, Optional
 
@@ -23,9 +23,10 @@ from app.models import (
     ScanImport,
 )
 from app.pending import credit_applications_for_month, resolved_after_close
-from app.money import ZERO, money_equal, to_money
+from app.money import ZERO, money_equal, money_or_unknown, to_money
 from app.posting import excluded_from_linking, note_value
 from app.home import render_home
+from app.report import document_is_suspect, render_monthly_report
 from app.phone import router as phone_router
 from app.statements import import_statement_text
 from app.sync import SyncError, run_sync, sync_status
@@ -217,10 +218,80 @@ def _prefers_html(request):
     return html_at < json_at
 
 
+def _default_dashboard_month(session, months):
+    # type: (Session, List[str]) -> str
+    line = session.exec(
+        select(BankLine).order_by(BankLine.period.desc(), BankLine.id.desc())
+    ).first()
+    if line is not None and line.period:
+        return line.period
+    if months:
+        return months[0]
+    return date.today().strftime("%Y-%m")
+
+
+def _dashboard_payload(session, requested):
+    # type: (Session, Optional[str]) -> dict
+    periods = session.exec(select(Period).order_by(Period.month.desc())).all()
+    months = [row.month for row in periods]
+    selected = requested if requested and MONTH_RE.match(requested) else None
+    if selected is None:
+        selected = _default_dashboard_month(session, months)
+    if selected not in months:
+        months = [selected] + months
+    checklist = period_checklist(selected, session)
+    documents = session.exec(select(Document).where(Document.period == selected)).all()
+    categories = {}
+    for category in session.exec(select(Category)).all():
+        if category.id is not None:
+            categories[category.id] = category.code
+    validated = 0
+    review = 0
+    suspect = 0
+    for document in documents:
+        code = categories.get(document.category_id)
+        if document_is_suspect(document, code):
+            suspect += 1
+        if document.status == "validated":
+            validated += 1
+        elif document.status == "review":
+            review += 1
+    pending = []
+    rows = session.exec(
+        select(OpenItem)
+        .where(OpenItem.period == selected, OpenItem.status == "open")
+        .order_by(OpenItem.id)
+    ).all()
+    for item in rows:
+        pending.append(
+            {
+                "kind": item.kind,
+                "description": item.description,
+                "amount": money_or_unknown(item.amount),
+                "due": item.due_date.isoformat() if item.due_date else "",
+            }
+        )
+    return {
+        "month": selected,
+        "months": months,
+        "checklist": checklist,
+        "documents": len(documents),
+        "validated": validated,
+        "review": review,
+        "suspect": suspect,
+        "pending": pending,
+        "sync": sync_status(),
+    }
+
+
 @app.get("/")
-def root(request: Request):
+def root(
+    request: Request,
+    month: Optional[str] = Query(default=None),
+    session: Session = Depends(get_session),
+):
     if _prefers_html(request):
-        return HTMLResponse(render_home())
+        return HTMLResponse(render_home(_dashboard_payload(session, month)))
     return {"name": "MonthClose AI", "docs": "/docs"}
 
 
@@ -570,6 +641,13 @@ def close_period(
         "status": period.status,
         "closed_at": period.closed_at.isoformat() if period.closed_at else None,
     }
+
+
+@app.get("/report/{month}/view", response_class=HTMLResponse)
+def monthly_report_view(month: str, session: Session = Depends(get_session)):
+    """Printable monthly report. Figures are computed in code; the model writes the summary."""
+    require_month(month)
+    return HTMLResponse(render_monthly_report(session, month))
 
 
 @app.get("/reports/{month}")

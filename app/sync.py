@@ -143,7 +143,7 @@ def _run_sync():
         "linker": {},
         "drafts": {
             "created": 0,
-            "already_drafted": 0,
+            "updated": 0,
             "skipped": 0,
             "failed": 0,
             "owner_email_missing": 0,

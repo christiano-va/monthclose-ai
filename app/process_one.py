@@ -552,22 +552,21 @@ def process_email_without_pdf(session, message, eml_path, reprocess=False):
         draft = _draft_invoice_email(counterparty, hours, period)
         if hours:
             description = (
-                "Owner: approve the draft email asking the accountant to issue "
-                "the sales invoice to %s for %s hours" % (counterparty, hours)
+                "Owner: issue the sales invoice to %s for %s hours."
+                % (counterparty, hours)
             )
         else:
-            description = (
-                "Owner: approve the draft email asking the accountant to issue "
-                "the sales invoice to %s" % counterparty
-            )
-        notes = " | ".join(
-            [
-                "source_id: %s" % source_id,
-                "email: %s" % path.name,
-                "reason: %s" % reason_code,
-                "summary: %s" % _one_line(classified.get("summary") or message.subject),
-            ]
-        )
+            description = "Owner: issue the sales invoice to %s." % counterparty
+        note_parts = [
+            "source_id: %s" % source_id,
+            "email: %s" % path.name,
+            "reason: %s" % reason_code,
+            "summary: %s" % _one_line(classified.get("summary") or message.subject),
+            "counterparty: %s" % counterparty,
+        ]
+        if hours:
+            note_parts.append("hours: %s" % hours)
+        notes = " | ".join(note_parts)
         existing = _find_open_item(session, source_id)
         if existing is None:
             _get_or_create_period(session, period)
@@ -632,18 +631,10 @@ def process_email_without_pdf(session, message, eml_path, reprocess=False):
 
 def _draft_invoice_email(counterparty, hours, period):
     # type: (str, str, str) -> str
-    """Draft only. The owner approves it; nothing is sent to the accountant."""
-    subject = "Pedido de emissão de fatura — %s — %s" % (counterparty, period)
-    if hours:
-        detail = "O cliente %s aprovou %s horas de %s." % (counterparty, hours, period)
-    else:
-        detail = "Há uma fatura de venda por emitir a %s (%s)." % (counterparty, period)
-    body = (
-        "Bom dia,\n\n%s "
-        "Peço a emissão da fatura, com o prazo de pagamento habitual.\n\n"
-        "Obrigado."
-    ) % detail
-    return "To: accountant\nSubject: %s\n\n%s" % (subject, body)
+    """Draft only. The owner issues the invoice. Nothing is sent."""
+    from app.owner_drafts import invoice_request_body
+
+    return invoice_request_body(counterparty, hours, period)
 
 
 def _save_attachment(data, original_filename, directory=None):
@@ -1278,7 +1269,7 @@ def _record_missing_sale(
     label = reference or _one_line(description) or "a stay"
     text = (
         "Owner: missing sales invoice for %s (%s). "
-        "Obtain the document; nothing is sent to the accountant automatically."
+        "Look for it, or ask the customer for a second copy."
         % (label, amount)
     )
     for item in rows:

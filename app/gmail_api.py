@@ -160,13 +160,19 @@ def insert_raw(service, raw, label_ids):
     return created.get("id") or ""
 
 
-def create_draft(service, recipient, subject, body):
-    # type: (Any, str, str, str) -> str
-    """Create one draft addressed to `recipient`. Nothing is sent."""
+def _draft_message(recipient, subject, body):
+    # type: (str, str, str) -> EmailMessage
     message = EmailMessage()
     message["To"] = recipient
     message["Subject"] = subject
     message.set_content(body)
+    return message
+
+
+def create_draft(service, recipient, subject, body):
+    # type: (Any, str, str, str) -> str
+    """Create one draft addressed to `recipient`. Nothing is sent."""
+    message = _draft_message(recipient, subject, body)
     created = (
         service.users()
         .drafts()
@@ -177,3 +183,23 @@ def create_draft(service, recipient, subject, body):
         .execute()
     )
     return created.get("id") or ""
+
+
+def update_draft(service, draft_id, recipient, subject, body):
+    # type: (Any, str, str, str, str) -> str
+    """Replace the text of an existing draft. Nothing is sent."""
+    message = _draft_message(recipient, subject, body)
+    updated = (
+        service.users()
+        .drafts()
+        .update(
+            userId="me",
+            id=draft_id,
+            body={
+                "id": draft_id,
+                "message": {"raw": _encode_raw(message.as_bytes())},
+            },
+        )
+        .execute()
+    )
+    return updated.get("id") or ""

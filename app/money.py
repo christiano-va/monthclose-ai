@@ -30,3 +30,14 @@ def parse_pt_money(value):
 def money_equal(left, right, tolerance=Decimal("0.01")):
     # type: (Decimal, Decimal, Decimal) -> bool
     return abs(to_money(left) - to_money(right)) <= tolerance
+
+
+def money_or_unknown(amount):
+    # type: (Union[None, str, int, float, Decimal]) -> str
+    """A task amount of zero has not been stated. Do not print 0.00 for it."""
+    if amount is None or amount == "":
+        return "amount to be confirmed"
+    value = to_money(amount)
+    if value == ZERO:
+        return "amount to be confirmed"
+    return str(value)

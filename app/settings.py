@@ -39,3 +39,12 @@ def owner_email():
     # type: () -> str
     """Address that receives owner drafts. Empty when unset. Drafts are never sent."""
     return (os.getenv("OWNER_EMAIL") or "").strip()
+
+
+def company_name():
+    # type: () -> str
+    """Display name on the monthly report. Not a secret."""
+    raw = (os.getenv("COMPANY_NAME") or "").strip()
+    if raw:
+        return raw
+    return "Nortavia Digital"
