@@ -6,7 +6,7 @@ import json
 import logging
 import re
 import sys
-from datetime import timedelta
+from datetime import date, timedelta
 from decimal import InvalidOperation
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -24,11 +24,14 @@ from app.extract import (
 )
 from app.mailbox import Attachment, LocalEmlMailbox, MailMessage
 from app.models import Category, Document, Link, OpenItem, Period
-from app.money import ZERO, money_equal, to_money
+from app.money import ZERO, money_equal, parse_pt_money, to_money
 from app.posting import (
+    ACCOUNT_PARTNER,
+    CATEGORY_PARTNER,
     CATEGORY_SETTLEMENT,
     CATEGORY_SUSPECT,
     OWNER_TASK_KINDS,
+    TIPO_SETTLEMENT,
     TIPO_SUSPECT,
     deductible_vat,
     ensure_category,
@@ -42,16 +45,20 @@ from app.posting import (
     is_meal_topup,
     is_settlement,
     is_tax_or_social,
+    liability_account,
     main_line,
     norm_nif,
+    note_value,
     party_label,
     primary_rate,
     resolve_counterparty,
     resolve_direction,
     resolve_tipo,
+    set_note,
     settlement_account,
     should_split_lines,
     sum_lines,
+    suspect_flags,
     task_assignee,
     tax_category_code,
     asset_category_code,
@@ -693,6 +700,313 @@ def _negate(value):
     return amount
 
 
+def _is_reimbursement(kind, text):
+    # type: (str, str) -> bool
+    """A note asking to repay the manager or a partner. Not a supplier invoice."""
+    blob = (text or "").lower()
+    if "pedido de reembolso" in blob or "nota de despesas" in blob:
+        return True
+    return kind == "other" and "reembolso" in blob
+
+
+def _person_name(extracted, text):
+    # type: (Dict[str, Any], str) -> str
+    for key in ("payee_name", "recipient_name"):
+        raw = str(extracted.get(key) or "").strip()
+        if raw and "nortavia" not in raw.lower():
+            return " ".join(raw.split())
+    match = re.search(
+        r"Requerente[\s\S]{0,120}?Nome\s+([A-ZÁÉÍÓÚÃÕÂÊÔÇ][A-Za-zÁÉÍÓÚÃÕÂÊÔÇáéíóúãõâêôç]+(?:\s+[A-ZÁÉÍÓÚÃÕÂÊÔÇ][A-Za-zÁÉÍÓÚÃÕÂÊÔÇáéíóúãõâêôç]+){0,3})",
+        text or "",
+    )
+    if match:
+        return " ".join(match.group(1).split())
+    return ""
+
+
+def _nif_for_person(session, name):
+    # type: (Session, str) -> Optional[str]
+    target = " ".join((name or "").lower().split())
+    if not target:
+        return None
+    rows = session.exec(select(Document).where(Document.nif.isnot(None))).all()
+    for document in rows:
+        entity = " ".join((document.entity or "").lower().split())
+        if entity == target and document.nif and not is_company_nif(document.nif):
+            return _stored_nif(document.nif)
+    return None
+
+
+def _reimbursement_ibans(session, person, source_id):
+    # type: (Session, str, str) -> List[str]
+    """IBANs already used to reimburse this person. The company account is not one."""
+    target = " ".join((person or "").lower().split())
+    found = []  # type: List[str]
+    if not target:
+        return found
+    rows = session.exec(select(Document)).all()
+    for document in rows:
+        if document.source_id == source_id:
+            continue
+        entity = " ".join((document.entity or "").lower().split())
+        if entity != target:
+            continue
+        notes = document.notes or ""
+        if "normal_reimbursement: yes" not in notes and "reembolso" not in notes.lower():
+            continue
+        for iban in find_ibans(notes):
+            if iban not in found:
+                found.append(iban)
+    return found
+
+
+_MONEY_RE = re.compile(r"(\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{2})")
+
+
+def _amount_after(text, label):
+    # type: (str, str) -> Optional[Any]
+    match = re.search(label, text or "", re.IGNORECASE)
+    if match is None:
+        return None
+    window = (text or "")[match.end() : match.end() + 60]
+    hit = _MONEY_RE.search(window)
+    if hit is None:
+        return None
+    return parse_pt_money(hit.group(1))
+
+
+def _withholding_from_text(text):
+    # type: (str) -> Optional[Tuple[Any, Any, Any]]
+    gross = _amount_after(text, r"valor da renda|valor il[ií]quido|rendimento bruto")
+    withholding = _amount_after(text, r"reten[cç][aã]o na fonte")
+    net = _amount_after(
+        text, r"import[aâ]ncia recebida|l[ií]quido recebido|valor l[ií]quido pago"
+    )
+    if gross is None or withholding is None or net is None:
+        return None
+    if not money_equal(gross - withholding, net):
+        return None
+    if withholding <= ZERO or net <= ZERO:
+        return None
+    return to_money(gross), to_money(withholding), to_money(net)
+
+
+def _withholding_of(lines, text, kind):
+    # type: (list, str, str) -> Optional[Tuple[Any, Any, Any]]
+    """Gross, IRS withheld and net paid. Payslips keep their own gross/net split."""
+    if kind == "payslip":
+        return None
+    parsed = _withholding_from_text(text)
+    tax = ZERO
+    positive = ZERO
+    found = False
+    vat_on_positive = ZERO
+    for line in lines or []:
+        description = (line.get("description") or "").lower()
+        if line["total"] < ZERO and (
+            line.get("nature") == "tax" or "reten" in description
+        ):
+            tax += -line["total"]
+            found = True
+        elif line["total"] > ZERO:
+            positive += line["total"]
+            vat_on_positive += line["vat"]
+    if found and positive > ZERO and tax > ZERO and vat_on_positive == ZERO:
+        gross = to_money(positive)
+        withholding = to_money(tax)
+        net = to_money(gross - withholding)
+        if net > ZERO:
+            if parsed is None or (
+                money_equal(parsed[0], gross) and money_equal(parsed[1], withholding)
+            ):
+                return gross, withholding, net
+    return parsed
+
+
+def _scheduled_dates(text, extracted_due):
+    # type: (str, Optional[date]) -> Tuple[Optional[date], Optional[date]]
+    """Return (due_date, debit_date) printed on the document."""
+    due = extracted_due
+    if due is None:
+        match = re.search(r"Vencimento:\s*(\d{4}-\d{2}-\d{2})", text or "")
+        if match:
+            try:
+                due = parse_iso_date(match.group(1))
+            except (TypeError, ValueError):
+                due = None
+    debit = None  # type: Optional[date]
+    match = re.search(
+        r"(?:d[eé]bito direto|pagamento).{0,40}?(\d{2})/(\d{2})/(\d{4})",
+        text or "",
+        re.IGNORECASE,
+    )
+    if match:
+        try:
+            debit = date(int(match.group(3)), int(match.group(2)), int(match.group(1)))
+        except ValueError:
+            debit = None
+    if due is None:
+        due = debit
+    return due, debit
+
+
+def _compact_token(value):
+    # type: (str) -> str
+    return "".join(ch for ch in (value or "").upper() if ch.isalnum())
+
+
+def _match_tokens(text, document_number):
+    # type: (str, str) -> List[str]
+    """Identifiers worth looking for in a bank description. Short numbers are omitted."""
+    found = []  # type: List[str]
+
+    def add(raw):
+        # type: (str) -> None
+        token = _compact_token(raw)
+        if len(token) < 6 or token in found:
+            return
+        if token.isdigit() and len(token) < 8:
+            return
+        found.append(token)
+
+    add(document_number or "")
+    for match in re.finditer(
+        r"\b(\d{4}\s*/\s*[A-Z]{1,6}\s*/\s*\d{3,})\b", text or "", re.IGNORECASE
+    ):
+        add(match.group(1))
+    for match in re.finditer(r"\b([A-Z]{2,}\d[A-Z0-9]{2,})\b", (text or "").upper()):
+        add(match.group(1))
+    for match in re.finditer(r"\d(?:[\d \t.]{6,}\d)", text or ""):
+        digits = re.sub(r"\D", "", match.group(0))
+        if 8 <= len(digits) <= 22:
+            add(digits)
+    return found[:12]
+
+
+def _attachment_key(source_id):
+    # type: (Optional[str]) -> str
+    text = source_id or ""
+    marker = ":nature:"
+    if marker in text:
+        return text.split(marker, 1)[0]
+    return text
+
+
+def _next_month_on(day_number, origin):
+    # type: (int, date) -> date
+    month = origin.month + 1
+    year = origin.year
+    if month == 13:
+        month = 1
+        year += 1
+    return date(year, month, day_number)
+
+
+def _sync_withholding_item(session, document, withholding, net):
+    # type: (Session, Document, Any, Any) -> None
+    marker = "withholding_liability: %s" % document.id
+    rows = session.exec(select(OpenItem).where(OpenItem.document_id == document.id)).all()
+    existing = None
+    for item in rows:
+        if item.notes and marker in item.notes:
+            existing = item
+            break
+    description = (
+        "IRS withholding %s on %s (%s) is payable to Autoridade Tributária. "
+        "The bank payment is the net %s; this liability stays open."
+        % (withholding, document.document_number, document.entity, net)
+    )
+    due = _next_month_on(20, document.document_date)
+    notes = " | ".join(
+        [
+            marker,
+            "gross: %s" % document.total,
+            "withholding: %s" % withholding,
+            "net_paid: %s" % net,
+        ]
+    )
+    if existing is None:
+        _get_or_create_period(session, document.period)
+        item = OpenItem(
+            document_id=document.id,
+            period=document.period,
+            kind="payable",
+            description=description,
+            amount=to_money(withholding),
+            due_date=due,
+            status="open",
+            notes=notes,
+            confidence=0.95,
+            justification="Withholding is a liability; the document total is the gross amount.",
+        )
+        session.add(item)
+    else:
+        existing.description = description
+        existing.amount = to_money(withholding)
+        existing.due_date = due
+        existing.status = "open"
+        existing.notes = notes
+        existing.period = document.period
+        existing.justification = (
+            "Withholding is a liability; the document total is the gross amount."
+        )
+        session.add(existing)
+    session.commit()
+
+
+def _sync_credit_item(session, credit, original, reduction, applies_next):
+    # type: (Session, Document, Document, Any, bool) -> None
+    marker = "credit_balance: %s" % credit.id
+    rows = session.exec(select(OpenItem)).all()
+    existing = None
+    for item in rows:
+        if item.notes and marker in item.notes:
+            existing = item
+            break
+    if not applies_next:
+        if existing is not None:
+            existing.status = "done"
+            session.add(existing)
+            session.commit()
+        return
+    description = (
+        "Credit note %s reduces the payable of %s by %s. "
+        "It is deducted on the next invoice, not on the payment already made."
+        % (credit.document_number, original.document_number, reduction)
+    )
+    notes = " | ".join(
+        [
+            marker,
+            "invoice: %s" % original.document_number,
+            "credit_applies: next_invoice",
+        ]
+    )
+    if existing is None:
+        _get_or_create_period(session, credit.period)
+        item = OpenItem(
+            document_id=credit.id,
+            period=credit.period,
+            kind="payable",
+            description=description,
+            amount=to_money(-to_money(reduction)),
+            due_date=None,
+            status="open",
+            notes=notes,
+            confidence=0.9,
+            justification="Credit note is negative and reduces a later invoice.",
+        )
+        session.add(item)
+    else:
+        existing.description = description
+        existing.amount = to_money(-to_money(reduction))
+        existing.status = "open"
+        existing.notes = notes
+        existing.period = credit.period
+        existing.document_id = credit.id
+        session.add(existing)
+    session.commit()
+
+
 def _select_category(
     session, extracted, text, message, kind, direction, counterparty_nif, line_text, nature
 ):
@@ -945,6 +1259,223 @@ def _tax_counterparty(kind, text, direction, name, nif):
     return name, nif, direction
 
 
+def _history_row(document):
+    # type: (Document) -> bool
+    return document.justification == "loaded from data/history JSON"
+
+
+def mark_duplicates(session):
+    # type: (Session) -> List[int]
+    """Same counterparty NIF and document number: the later copy is a 2.ª via.
+
+    Slices of one attachment (a top-up and its fee) share a source and stay.
+    """
+    rows = session.exec(select(Document)).all()
+    groups = {}  # type: Dict[Tuple[str, str], List[Document]]
+    for document in rows:
+        if _history_row(document):
+            continue
+        nif = norm_nif(document.nif)
+        number = _compact_token(document.document_number or "")
+        if not nif or len(number) < 4:
+            continue
+        groups.setdefault((nif, number), []).append(document)
+
+    marked = []  # type: List[int]
+    for documents in groups.values():
+        by_source = {}  # type: Dict[str, List[Document]]
+        for document in documents:
+            by_source.setdefault(_attachment_key(document.source_id), []).append(document)
+        if len(by_source) < 2:
+            continue
+        first_key = min(
+            by_source, key=lambda key: min(row.id or 0 for row in by_source[key])
+        )
+        original_id = min(row.id or 0 for row in by_source[first_key])
+        for key, copies in by_source.items():
+            if key == first_key:
+                continue
+            for document in copies:
+                document.status = "duplicate"
+                document.notes = set_note(
+                    document.notes,
+                    "duplicate_of",
+                    str(original_id),
+                )
+                document.notes = set_note(document.notes, "excluded_from_linking", "yes")
+                document.notes = set_note(document.notes, "excluded_from_totals", "yes")
+                document.justification = (
+                    "Second copy (2.ª via) of the same counterparty NIF and "
+                    "document number; excluded from totals and linking."
+                )
+                session.add(document)
+                links = session.exec(
+                    select(Link).where(Link.document_id == document.id)
+                ).all()
+                for link in links:
+                    session.delete(link)
+                if document.id is not None:
+                    marked.append(document.id)
+    if marked:
+        session.commit()
+    return marked
+
+
+def _credit_hint(document):
+    # type: (Document) -> str
+    blob = " ".join(
+        [
+            document.referenced_invoice or "",
+            document.notes or "",
+            document.lines_json or "",
+            document.document_number or "",
+        ]
+    )
+    hints = []  # type: List[str]
+    for match in re.finditer(
+        r"\b((?:FT|FR|FS|ND|RG)[\s./-]*[A-Z0-9]*\d[A-Z0-9/\-]*)",
+        blob,
+        re.IGNORECASE,
+    ):
+        token = _compact_token(match.group(1))
+        own = _compact_token(document.document_number or "")
+        if len(token) >= 4 and token != own and token not in hints:
+            hints.append(token)
+    hints.sort(key=len, reverse=True)
+    return hints[0] if hints else ""
+
+
+def _is_credit_document(document):
+    # type: (Document) -> bool
+    number = (document.document_number or "").upper()
+    if number.startswith("NC") or " NC " in (" " + number + " "):
+        return True
+    if document.total is not None and document.total < ZERO:
+        return True
+    notes = (document.notes or "").lower()
+    return "credit note" in notes or "nota de crédito" in notes or "nota de credito" in notes
+
+
+def bind_credit_notes(session):
+    # type: (Session) -> None
+    """Point each credit note at its invoice and reduce the amount payable."""
+    rows = session.exec(select(Document)).all()
+    invoices = []
+    credits = []
+    for document in rows:
+        if _history_row(document) or document.status == "duplicate":
+            continue
+        if _is_credit_document(document):
+            credits.append(document)
+        elif document.total is not None and document.total > ZERO:
+            invoices.append(document)
+    changed = False
+    for credit in credits:
+        hint = _credit_hint(credit)
+        nif = norm_nif(credit.nif)
+        chosen = None
+        for invoice in invoices:
+            if nif and norm_nif(invoice.nif) != nif:
+                continue
+            number = _compact_token(invoice.document_number or "")
+            if hint and (number.startswith(hint) or hint in number):
+                if chosen is None or (invoice.id or 0) < (chosen.id or 0):
+                    chosen = invoice
+        if chosen is None:
+            continue
+        reduction = to_money(abs(credit.total))
+        payable = to_money(chosen.total - reduction)
+        applies_next = (note_value(credit.notes, "credit_applies") or "") == "next_invoice"
+        credit.referenced_invoice = chosen.document_number
+        credit.notes = set_note(credit.notes, "reduces_invoice", chosen.document_number or "")
+        credit.notes = set_note(credit.notes, "reduces_amount", str(reduction))
+        chosen.notes = set_note(chosen.notes, "credit_reduction", str(reduction))
+        chosen.notes = set_note(chosen.notes, "amount_payable", str(payable))
+        if applies_next:
+            chosen.notes = set_note(chosen.notes, "cash_amount", str(to_money(chosen.total)))
+        else:
+            chosen.notes = set_note(chosen.notes, "cash_amount", str(payable))
+        session.add(credit)
+        session.add(chosen)
+        changed = True
+        _sync_credit_item(session, credit, chosen, reduction, applies_next)
+    if changed:
+        session.commit()
+
+
+def _kind_of(document):
+    # type: (Document) -> str
+    return note_value(document.notes, "kind") or ""
+
+
+def connect_tax_proofs(session):
+    # type: (Session) -> None
+    """A payment proof settles its guide. The guide is not a second cash movement."""
+    rows = session.exec(select(Document)).all()
+    guides = []
+    proofs = []
+    for document in rows:
+        if _history_row(document) or document.status == "duplicate":
+            continue
+        if document.tipo != TIPO_SETTLEMENT:
+            continue
+        kind = _kind_of(document)
+        if kind == "tax_guide":
+            guides.append(document)
+        elif kind == "payment_proof":
+            proofs.append(document)
+    changed = False
+    for proof in proofs:
+        chosen = None
+        for guide in guides:
+            if not proof.category_id or guide.category_id != proof.category_id:
+                continue
+            if not money_equal(guide.total, proof.total):
+                continue
+            if guide.document_date > proof.document_date:
+                continue
+            if chosen is None or guide.document_date > chosen.document_date:
+                chosen = guide
+        if chosen is None:
+            continue
+        proof.referenced_invoice = chosen.document_number
+        proof.notes = set_note(proof.notes, "settles_guide", chosen.document_number or "")
+        chosen.notes = set_note(chosen.notes, "settled_by_proof", str(proof.id))
+        chosen.notes = set_note(chosen.notes, "cash_movement", "no")
+        session.add(proof)
+        session.add(chosen)
+        changed = True
+    if changed:
+        session.commit()
+
+
+def finalize_documents(session):
+    # type: (Session) -> List[int]
+    """Duplicates, credit notes and tax-proof links, after the inbox rows exist."""
+    ensure_special_categories(session)
+    marked = mark_duplicates(session)
+    bind_credit_notes(session)
+    connect_tax_proofs(session)
+    ensure_owner_tasks(session)
+    return marked
+
+
+def _patch_duplicate_results(session, results):
+    # type: (Session, List[Dict[str, Any]]) -> None
+    for item in results:
+        document_id = item.get("document_id")
+        if not document_id:
+            continue
+        document = session.get(Document, document_id)
+        if document is None or document.status != "duplicate":
+            continue
+        item["status"] = "duplicate"
+        item["reason"] = (
+            "second copy (2.ª via) of %s; excluded from totals and linking"
+            % (document.document_number or "")
+        )
+
+
 def ensure_owner_tasks(session):
     # type: (Session) -> None
     """missing_document and invoice_to_request are tasks for the owner."""
@@ -1001,6 +1532,15 @@ def process_attachment(
     counterparty_name, counterparty_nif, direction = _tax_counterparty(
         kind, text, direction, counterparty_name, counterparty_nif
     )
+    reimbursement = _is_reimbursement(kind, text)
+    if reimbursement:
+        person = _person_name(extracted, text)
+        if person and "nortavia" not in person.lower():
+            counterparty_name = person
+        person_nif = _nif_for_person(session, counterparty_name)
+        if person_nif:
+            counterparty_nif = person_nif
+        direction = "purchase"
     extracted["counterparty_name"] = counterparty_name
     extracted["counterparty_nif"] = counterparty_nif or ""
     extracted["nif"] = counterparty_nif
@@ -1034,9 +1574,15 @@ def process_attachment(
         due_date = parse_iso_date(validation.get("due_date") or extracted.get("due_date"))
     except (TypeError, ValueError):
         due_date = None
+    due_date, debit_date = _scheduled_dates(text, due_date)
 
     payment_iban = _payment_iban(extracted, text)
-    issuer_known, previous_ibans = _issuer_history(session, issuer_nif, source_id)
+    if reimbursement:
+        # Compare the IBAN with this person's earlier reimbursements, not the company account.
+        previous_ibans = _reimbursement_ibans(session, counterparty_name, source_id)
+        issuer_known = bool(previous_ibans)
+    else:
+        issuer_known, previous_ibans = _issuer_history(session, issuer_nif, source_id)
     flag_text = "\n".join([message.subject or "", message.body or "", text or ""])
     flags = resolve_risk_flags(
         extracted.get("risk_flags"),
@@ -1048,12 +1594,15 @@ def process_attachment(
         due_date,
         payment_iban,
     )
-    suspect = bool(flags)
+    blocking_flags = suspect_flags(flags)
+    suspect = bool(blocking_flags)
 
     if doc_date is None and existing is not None and existing.document_date is not None:
         doc_date = existing.document_date
     if doc_date is None:
-        status, reason = _review_reason(validation, float(extracted.get("confidence") or 0), flags, None, "")
+        status, reason = _review_reason(
+            validation, float(extracted.get("confidence") or 0), blocking_flags, None, ""
+        )
         extra = "validation failure: cannot store document without a date"
         reason = (reason + "; " + extra).strip("; ")
         return [
@@ -1139,6 +1688,7 @@ def process_attachment(
         sid = piece["source_id"]
         current = existing if sid == source_id else _find_stored(session, sid, sid)
         old = _snapshot(session, current) if current is not None else None
+        tax_payment = False
 
         if suspect:
             category = suspect_category
@@ -1160,6 +1710,17 @@ def process_attachment(
             )
             cat_source = "rule"
             tipo = resolve_tipo(direction, kind, CATEGORY_SETTLEMENT, True, False, False)
+        elif reimbursement:
+            category = _category_by_code(session, CATEGORY_PARTNER)
+            raw_code = CATEGORY_PARTNER
+            account = ACCOUNT_PARTNER
+            cat_confidence = 0.93
+            cat_justification = (
+                "Reimbursement to %s is a normal flow, booked to partner account %s."
+                % (counterparty_name, ACCOUNT_PARTNER)
+            )
+            cat_source = "rule"
+            tipo = TIPO_SETTLEMENT
         else:
             account = ""
             category, cat_confidence, cat_justification, cat_source, raw_code = _select_category(
@@ -1206,11 +1767,26 @@ def process_attachment(
                 tax_payment,
                 asset,
             )
+            if tax_payment and category is not None:
+                mapped = liability_account(category.code)
+                if mapped:
+                    account = mapped
+                tipo = TIPO_SETTLEMENT
+                cat_justification = (
+                    "Settles liability %s (account %s); not booked as a cost."
+                    % (category.code, account or mapped or "")
+                )
+                cat_source = "rule"
+                cat_confidence = max(float(cat_confidence), 0.95)
 
         if suspect:
             account = ""
         elif settles:
             account = settlement_account(session, kind, direction, counterparty_nif)
+        elif reimbursement:
+            account = ACCOUNT_PARTNER
+        elif tax_payment and category is not None and liability_account(category.code):
+            account = liability_account(category.code)
         else:
             account = category.snc_account if category is not None and category.snc_account else ""
 
@@ -1223,7 +1799,7 @@ def process_attachment(
             )
 
         status, reason = _review_reason(
-            validation, decision_confidence, flags, category, raw_code
+            validation, decision_confidence, blocking_flags, category, raw_code
         )
         if settles and kind != "payout_report" and not referenced:
             status = "review"
@@ -1247,6 +1823,18 @@ def process_attachment(
             if "credit note stored negative" not in reason:
                 note = "credit note stored negative so it is not a second expense"
                 reason = (reason + "; " + note).strip("; ")
+
+        withheld = None
+        if not credit and piece["vat"] == ZERO:
+            withheld = _withholding_of(piece_lines, text, kind)
+        if withheld is not None and (
+            money_equal(piece["total"], withheld[2]) or money_equal(piece["total"], withheld[0])
+        ):
+            base = withheld[0]
+            vat_amount = ZERO
+            total = withheld[0]
+        else:
+            withheld = None
 
         notes_parts = []  # type: List[str]
         if reason:
@@ -1275,12 +1863,45 @@ def process_attachment(
             notes_parts.append("referenced_invoice: " + referenced)
         if kind == "payslip" and validation.get("deductions") is not None:
             notes_parts.append("deductions: " + str(validation.get("deductions")))
+        if due_date is not None:
+            notes_parts.append("due_date: " + due_date.isoformat())
+        if debit_date is not None:
+            notes_parts.append("scheduled_payment: " + debit_date.isoformat())
+        currency = str(extracted.get("currency") or "").strip().upper()
+        if currency:
+            notes_parts.append("currency: " + currency)
+        tokens = _match_tokens(
+            "\n".join([text or "", message.subject or "", message.body or ""]),
+            str(extracted.get("document_number") or ""),
+        )
+        if tokens:
+            notes_parts.append("match_tokens: " + ",".join(tokens))
+        if withheld is not None:
+            notes_parts.append("gross: " + str(withheld[0]))
+            notes_parts.append("withholding: " + str(withheld[1]))
+            notes_parts.append("net_paid: " + str(withheld[2]))
+        if reimbursement and not suspect:
+            notes_parts.append("normal_reimbursement: yes")
+            notes_parts.append("not_a_cost: partner current account")
+            notes_parts.append("snc_account: " + ACCOUNT_PARTNER)
+        if (not suspect) and (not settles) and tipo == TIPO_SETTLEMENT and is_tax_or_social(
+            kind, text, counterparty_name
+        ):
+            notes_parts.append("not_a_cost: settles a tax or social-security liability")
+            if account:
+                notes_parts.append("snc_account: " + account)
+        if credit:
+            lowered_text = (text or "").lower()
+            if "proxima fatura" in lowered_text or "próxima fatura" in lowered_text:
+                notes_parts.append("credit_applies: next_invoice")
+            else:
+                notes_parts.append("credit_applies: this_invoice")
 
         fields = {
             "source_id": sid,
             "period": period_month,
             "document_date": doc_date,
-            "payment_date": None,
+            "payment_date": debit_date,
             "tipo": tipo,
             "category_id": category.id if category is not None else None,
             "entity": counterparty_name or "unknown",
@@ -1305,6 +1926,8 @@ def process_attachment(
         if not fields["original_filename"]:
             fields["original_filename"] = "attachment.pdf"
         document, skipped = _apply_document(session, current, fields)
+        if withheld is not None and document.id is not None:
+            _sync_withholding_item(session, document, withheld[1], withheld[2])
         if suspect and document.id is not None:
             links = session.exec(select(Link).where(Link.document_id == document.id)).all()
             for link in links:
@@ -1383,7 +2006,7 @@ def process_eml(session, message, eml_path, categories, reprocess=False):
     if not pdfs:
         item = process_email_without_pdf(session, message, path, reprocess=reprocess)
         logger.info("%s %s %s", item["status"], path.name, item.get("reason") or "")
-        ensure_owner_tasks(session)
+        finalize_documents(session)
         return [item]
 
     results = []
@@ -1412,7 +2035,8 @@ def process_eml(session, message, eml_path, categories, reprocess=False):
                 item.get("reason") or "",
             )
             results.append(item)
-    ensure_owner_tasks(session)
+    finalize_documents(session)
+    _patch_duplicate_results(session, results)
     return results
 
 

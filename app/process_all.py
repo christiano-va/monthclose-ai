@@ -81,6 +81,7 @@ def format_summary(results):
         "error": 0,
         "no_document": 0,
         "bank_statement": 0,
+        "duplicate": 0,
     }
     other = {}  # type: Dict[str, int]
     skipped = 0
@@ -101,6 +102,7 @@ def format_summary(results):
         "error: %d" % counts["error"],
         "no_document: %d" % counts["no_document"],
         "bank_statement: %d" % counts["bank_statement"],
+        "duplicate: %d" % counts["duplicate"],
         "llm_calls: %d" % llm_call_count(),
         "items: %d" % len(results),
         "skipped_already_stored: %d" % skipped,
@@ -110,7 +112,7 @@ def format_summary(results):
     for status in sorted(other):
         lines.append("%s: %d" % (status, other[status]))
     lines.append("")
-    lines.append("review / error / no_document / bank_statement")
+    lines.append("review / error / no_document / bank_statement / duplicate")
     lines.append("status | email | attachment | reason")
     found = False
     for item in results:
@@ -119,6 +121,7 @@ def format_summary(results):
             "error",
             "no_document",
             "bank_statement",
+            "duplicate",
         ):
             continue
         found = True

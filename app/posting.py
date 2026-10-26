@@ -24,6 +24,31 @@ CATEGORY_SETTLEMENT = "SETTLEMENT"
 CATEGORY_SUSPECT = "SUSPECT"
 ACCOUNT_CUSTOMERS = "211"
 ACCOUNT_SUPPLIERS = "221"
+ACCOUNT_PARTNER = "2781"
+ACCOUNT_SOCIAL_SECURITY = "245"
+ACCOUNT_IRS_WITHHOLDING = "2421"
+ACCOUNT_IRC = "2411/2415"
+ACCOUNT_VAT = "2436"
+
+CATEGORY_PARTNER = "SOCIO_CONTA_CORRENTE"
+CATEGORY_SOCIAL_SECURITY = "ESTADO_SEGURANCA_SOCIAL"
+CATEGORY_IRS_WITHHOLDING = "ESTADO_RETENCOES_IRS"
+
+# personal_account is recorded, but alone it never makes a document suspect.
+SUSPECT_RISK_FLAGS = (
+    "iban_changed",
+    "iban_new",
+    "urgency_language",
+    "short_payment_deadline",
+)
+
+LIABILITY_ACCOUNT = {
+    CATEGORY_SOCIAL_SECURITY: ACCOUNT_SOCIAL_SECURITY,
+    CATEGORY_IRS_WITHHOLDING: ACCOUNT_IRS_WITHHOLDING,
+    "ESTADO_IRC": ACCOUNT_IRC,
+    "ESTADO_IRC_PPC": ACCOUNT_IRC,
+    "ESTADO_IVA": ACCOUNT_VAT,
+}
 
 OWNER_TASK_KINDS = ("missing_document", "invoice_to_request")
 
@@ -175,28 +200,60 @@ def is_tax_or_social(kind, text, counterparty):
 
 def tax_category_code(text, counterparty):
     # type: (str, str) -> Optional[str]
-    """Ledger category for a tax guide or a tax/social-security payment.
+    """Liability category for a tax guide or its payment proof.
 
-    IRS withholdings have no category in the history ledger.
+    The payment settles the liability. It is not a new cost: social security
+    is 245 (not the 635 expense), IRS withholding is 2421, IRC is 2411/2415,
+    VAT is 2436.
     """
     blob = ("%s\n%s" % (counterparty or "", text or "")).lower()
+    compact = "".join(ch for ch in blob if ch.isalnum())
     if (
         "segurança social" in blob
         or "seguranca social" in blob
         or "seg social" in blob
+        or "segurancasocial" in compact
     ):
-        return "PESSOAL_ENCARGOS"
-    if "por conta" in blob or "pagamento por conta" in blob:
+        return CATEGORY_SOCIAL_SECURITY
+    if "por conta" in blob or "pagamentoporconta" in compact:
         return "ESTADO_IRC_PPC"
-    if "reten" in blob and "irs" in blob:
-        return None
+    irs_word = "irs" in blob
+    withholding = (
+        "reten" in blob
+        or "retenc" in compact
+        or "fonte" in blob
+        or "predia" in blob
+        or "trabalho dependente" in blob
+    )
+    if irs_word and withholding:
+        return CATEGORY_IRS_WITHHOLDING
+    if irs_word and "por conta" not in blob and re.search(r"\birc\b", blob) is None:
+        if "comprovativo" in blob or "guia" in blob or "autoridade" in blob:
+            return CATEGORY_IRS_WITHHOLDING
     if re.search(r"\biva\b", blob) and (
         "autoridade tribut" in blob or "estado" in blob or "guia" in blob
     ):
         return "ESTADO_IVA"
-    if "irc" in blob and "pagamento por conta" not in blob:
+    if re.search(r"\birc\b", blob):
         return "ESTADO_IRC"
     return None
+
+
+def liability_account(category_code):
+    # type: (Optional[str]) -> Optional[str]
+    if not category_code:
+        return None
+    return LIABILITY_ACCOUNT.get(category_code)
+
+
+def suspect_flags(flags):
+    # type: (Sequence[str]) -> List[str]
+    """Flags that keep a document out of the books. personal_account is not one."""
+    found = []  # type: List[str]
+    for name in SUSPECT_RISK_FLAGS:
+        if name in (flags or []):
+            found.append(name)
+    return found
 
 
 def is_fixed_asset(text):
@@ -356,6 +413,24 @@ def ensure_special_categories(session):
         None,
         "Suspect document: no accounting entry, kept for review, excluded from linking",
     )
+    ensure_category(
+        session,
+        CATEGORY_PARTNER,
+        ACCOUNT_PARTNER,
+        "Partner or manager current account for a reimbursement of expenses",
+    )
+    ensure_category(
+        session,
+        CATEGORY_SOCIAL_SECURITY,
+        ACCOUNT_SOCIAL_SECURITY,
+        "Social security liability settled by the payment guide (not the TSU expense)",
+    )
+    ensure_category(
+        session,
+        CATEGORY_IRS_WITHHOLDING,
+        ACCOUNT_IRS_WITHHOLDING,
+        "IRS withheld at source, payable to the tax authority",
+    )
 
 
 def history_tipo_for_nif(session, nif, tipo):
@@ -384,12 +459,73 @@ def settlement_account(session, kind, direction, counterparty_nif):
     return ACCOUNT_SUPPLIERS
 
 
-def excluded_from_linking(category_code, notes):
-    # type: (Optional[str], Optional[str]) -> bool
+def excluded_from_linking(category_code, notes, status=None):
+    # type: (Optional[str], Optional[str], Optional[str]) -> bool
+    if status in ("duplicate", "error", "no_document"):
+        return True
     if category_code == CATEGORY_SUSPECT:
         return True
     text = notes or ""
     return "excluded_from_linking: yes" in text
+
+
+def excluded_from_totals(category_code, notes, status=None):
+    # type: (Optional[str], Optional[str], Optional[str]) -> bool
+    """Duplicates and suspect rows do not enter revenue, expense or tax totals."""
+    if status in ("duplicate", "error", "no_document"):
+        return True
+    if category_code == CATEGORY_SUSPECT:
+        return True
+    text = notes or ""
+    return "excluded_from_totals: yes" in text
+
+
+def counts_as_cost(tipo, status, category_code):
+    # type: (Optional[str], Optional[str], Optional[str]) -> bool
+    """Liability settlements, suspect rows and duplicates are not costs."""
+    if excluded_from_totals(category_code, None, status):
+        return False
+    if tipo in (TIPO_SETTLEMENT, TIPO_SUSPECT, None, ""):
+        return False
+    return tipo in (TIPO_GASTO, TIPO_PESSOAL, TIPO_ESTADO, TIPO_INVESTIMENTO)
+
+
+def note_value(notes, key):
+    # type: (Optional[str], str) -> Optional[str]
+    prefix = key + ": "
+    for part in (notes or "").split(" | "):
+        if part.startswith(prefix):
+            return part[len(prefix) :].strip()
+    return None
+
+
+def set_note(notes, key, value):
+    # type: (Optional[str], str, str) -> str
+    prefix = key + ": "
+    parts = []  # type: List[str]
+    replaced = False
+    for part in (notes or "").split(" | "):
+        if not part:
+            continue
+        if part.startswith(prefix):
+            parts.append(prefix + value)
+            replaced = True
+        else:
+            parts.append(part)
+    if not replaced:
+        parts.append(prefix + value)
+    return " | ".join(parts)
+
+
+def risk_flag_names(notes):
+    # type: (Optional[str]) -> List[str]
+    raw = note_value(notes, "risk_flags") or ""
+    found = []  # type: List[str]
+    for piece in raw.split(";"):
+        name = piece.strip()
+        if name and name not in found:
+            found.append(name)
+    return found
 
 
 def task_assignee(kind):

@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from sqlmodel import Session, select
 
 from app.models import BankLine, Period
-from app.money import ZERO, parse_pt_money, to_money
+from app.money import ZERO, money_equal, parse_pt_money, to_money
 
 
 def parse_bank_statement_csv(text):
@@ -84,6 +84,56 @@ def parse_bank_statement_csv(text):
         )
 
     return meta, rows
+
+
+def verify_statement_text(text):
+    # type: (str) -> Dict[str, Any]
+    """opening + credits - debits must equal the closing balance."""
+    meta, rows = parse_bank_statement_csv(text)
+    opening = (
+        to_money(meta["opening_balance"]) if meta.get("opening_balance") else None
+    )
+    closing = (
+        to_money(meta["closing_balance"]) if meta.get("closing_balance") else None
+    )
+    credits = ZERO
+    debits = ZERO
+    running = opening
+    running_ok = opening is not None
+    breaks = []  # type: List[str]
+    for row in rows:
+        credit = row["credit"] or ZERO
+        debit = row["debit"] or ZERO
+        credits += credit
+        debits += debit
+        if running is None:
+            continue
+        running = to_money(running + credit - debit)
+        printed = row["balance"]
+        if printed is not None and not money_equal(running, printed):
+            running_ok = False
+            breaks.append(
+                "%s %s running %s printed %s"
+                % (row["movement_date"], row["description"], running, printed)
+            )
+    computed = None
+    if opening is not None:
+        computed = to_money(opening + credits - debits)
+    equation_ok = (
+        computed is not None and closing is not None and money_equal(computed, closing)
+    )
+    return {
+        "opening_balance": str(opening) if opening is not None else None,
+        "credits": str(to_money(credits)),
+        "debits": str(to_money(debits)),
+        "computed_closing": str(computed) if computed is not None else None,
+        "closing_balance": str(closing) if closing is not None else None,
+        "equation_ok": equation_ok,
+        "running_balance_ok": running_ok and equation_ok,
+        "running_breaks": breaks,
+        "lines": len(rows),
+        "period_label": meta.get("period_label"),
+    }
 
 
 def import_statement_text(session, text, justification=None):

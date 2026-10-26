@@ -339,11 +339,17 @@ def line_items(extracted):
         base = parse_money_field(item.get("base"))
         vat = parse_money_field(item.get("vat"))
         total = parse_money_field(item.get("total"))
+        # A withholding is sometimes returned as a total only, with base left at zero.
+        if vat == ZERO and base == ZERO and total != ZERO:
+            base = total
         # A deduction is often extracted with a positive base and a negative total.
-        if vat == ZERO and total < ZERO and base > ZERO:
+        elif vat == ZERO and total < ZERO and base > ZERO:
             base = total
         elif vat == ZERO and base < ZERO and total > ZERO and total == -base:
             total = base
+        elif vat == ZERO and base != total and abs(base) != abs(total):
+            # Stamp duty lines sometimes copy the previous fee into the base.
+            base = total
         parsed.append(
             {
                 "description": str(item.get("description") or "").strip(),

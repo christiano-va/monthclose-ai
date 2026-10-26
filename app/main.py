@@ -229,7 +229,7 @@ def create_link(
         session.get(Category, document.category_id) if document.category_id else None
     )
     category_code = category.code if category is not None else None
-    if excluded_from_linking(category_code, document.notes):
+    if excluded_from_linking(category_code, document.notes, document.status):
         raise HTTPException(
             status_code=409,
             detail=(
