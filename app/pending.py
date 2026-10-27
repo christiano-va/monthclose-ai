@@ -778,6 +778,43 @@ def _stamp_document(document, confidence, justification, outcome):
     document.justification = _one_line(justification)
 
 
+def drop_confirm_tasks_for_linked_documents(session):
+    # type: (Session) -> int
+    """Remove open confirm_late_document tasks whose document is already fully linked."""
+    removed = 0
+    rows = session.exec(
+        select(OpenItem).where(OpenItem.kind == "confirm_late_document")
+    ).all()
+    for item in list(rows):
+        if item.status != "open" or item.document_id is None:
+            continue
+        document = session.get(Document, item.document_id)
+        if document is None or not document_fully_linked(session, document):
+            continue
+        session.delete(item)
+        removed += 1
+    if removed:
+        session.commit()
+    return removed
+
+
+def _drop_confirm_task(session, document):
+    # type: (Session, Document) -> None
+    if document is None or document.id is None:
+        return
+    marker = "confirm_for_document: %s" % document.id
+    rows = session.exec(
+        select(OpenItem).where(OpenItem.kind == "confirm_late_document")
+    ).all()
+    for item in list(rows):
+        notes = item.notes or ""
+        if item.status != "open":
+            continue
+        if item.document_id == document.id or marker in notes:
+            session.delete(item)
+    session.flush()
+
+
 def _find_task(session, marker):
     # type: (Session, str) -> Optional[OpenItem]
     rows = session.exec(select(OpenItem)).all()
@@ -790,7 +827,10 @@ def _find_task(session, marker):
 
 
 def _confirm_task(session, kind, candidate, document, confidence, justification, email_name):
-    # type: (Session, str, Dict[str, Any], Document, float, str, str) -> OpenItem
+    # type: (Session, str, Dict[str, Any], Document, float, str, str) -> Optional[OpenItem]
+    if kind == "confirm_late_document" and document_fully_linked(session, document):
+        _drop_confirm_task(session, document)
+        return None
     item = candidate.get("item")
     line = candidate.get("line")
     period = "1970-01"
@@ -951,6 +991,14 @@ def _resolve_line_set(session, document, group, context, email_name, email_sourc
             justification,
             email_name,
         )
+        if task is None:
+            session.commit()
+            return {
+                "outcome": "none",
+                "document_id": document.id,
+                "confidence": 0,
+                "justification": "Document is already fully linked.",
+            }
         session.commit()
         return {
             "outcome": "confirm",
@@ -1021,8 +1069,17 @@ def _resolve_line_set(session, document, group, context, email_name, email_sourc
 def resolve_late_document(session, document, context, email_name="", email_source=None):
     # type: (Session, Document, str, str, Optional[str]) -> Dict[str, Any]
     """Link a new document to one pending item, or ask the owner, or leave it."""
-    if document.id is None or _skip_document(document) or document_fully_linked(session, document):
+    if document.id is None or _skip_document(document):
         return {"outcome": "none", "document_id": document.id, "confidence": 0}
+    if document_fully_linked(session, document):
+        _drop_confirm_task(session, document)
+        session.commit()
+        return {
+            "outcome": "none",
+            "document_id": document.id,
+            "confidence": 0,
+            "justification": "Document is already fully linked.",
+        }
     if note_value(document.notes, "late_outcome") == "linked":
         return {
             "outcome": "linked",
@@ -1117,6 +1174,14 @@ def resolve_late_document(session, document, context, email_name="", email_sourc
             choice["justification"],
             email_name,
         )
+        if task is None:
+            session.commit()
+            return {
+                "outcome": "none",
+                "document_id": document.id,
+                "confidence": 0,
+                "justification": "Document is already fully linked.",
+            }
         session.commit()
         return _decision_payload(
             "confirm", document, choice, "", None, task.id, email_name

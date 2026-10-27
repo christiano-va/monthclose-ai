@@ -3,6 +3,7 @@ from typing import Any, Dict, List
 
 from sqlmodel import Session, select
 
+from app.archive import first_statement_month, is_archived_period
 from app.i18n import text
 from app.models import Category, Document, OpenItem
 from app.money import money_or_unknown
@@ -185,9 +186,12 @@ def _filtered_documents(session, lang, focus):
     # type: (Session, str, str) -> str
     documents = session.exec(select(Document).order_by(Document.period.desc(), Document.id.desc())).all()
     categories = _categories(session)
+    cutoff = first_statement_month(session)
     grouped = {}  # type: Dict[str, List[str]]
     order = []  # type: List[str]
     for document in documents:
+        if is_archived_period(document.period, cutoff):
+            continue
         category = categories.get(document.category_id) if document.category_id else None
         code = category.code if category is not None else ""
         if focus == "suspect":
@@ -226,14 +230,19 @@ def render_pending(session, month, months, lang, focus=""):
         return render_page(lang, "pending", month, months, title, body, path)
 
     documents = _documents(session)
+    cutoff = first_statement_month(session)
     items = session.exec(select(OpenItem).order_by(OpenItem.period.desc(), OpenItem.id)).all()
     periods = []  # type: List[str]
     for item in items:
+        if is_archived_period(item.period, cutoff):
+            continue
         if item.period and item.period not in periods:
             periods.append(item.period)
     resolved_ids = set()
     grouped = {}  # type: Dict[str, List[str]]
     for name in periods:
+        if is_archived_period(name, cutoff):
+            continue
         grouped[name] = []
         for row in resolved_after_close(session, name):
             if row.get("open_item_id"):
@@ -260,6 +269,8 @@ def render_pending(session, month, months, lang, focus=""):
         by_month[name] = {"open": [], "accepted": [], "resolved": list(grouped.get(name) or [])}
 
     for item in items:
+        if is_archived_period(item.period, cutoff):
+            continue
         if item.id in resolved_ids:
             continue
         status = item.status or "open"

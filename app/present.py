@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional
 
 from sqlmodel import Session, select
 
+from app.archive import first_statement_month, is_archived_period
 from app.i18n import text
 from app.models import Category, Document, Link, OpenItem
 from app.money import ZERO, money_or_unknown, to_money
@@ -537,6 +538,7 @@ def agenda_rows(session, lang, today=None):
     """Everything the owner still has to pay or do. A settled bank line drops off."""
     if today is None:
         today = date.today()
+    cutoff = first_statement_month(session)
     documents = {}  # type: Dict[int, Document]
     for document in session.exec(select(Document)).all():
         if document.id is not None:
@@ -552,6 +554,8 @@ def agenda_rows(session, lang, today=None):
     rows = []  # type: List[Dict[str, Any]]
     seen_docs = set()  # type: set
     for item in items:
+        if is_archived_period(item.period, cutoff):
+            continue
         document = documents.get(item.document_id) if item.document_id else None
         notes = item.notes or ""
         credit = "credit_balance:" in notes
@@ -588,6 +592,8 @@ def agenda_rows(session, lang, today=None):
             seen_docs.add(item.document_id)
     for document in documents.values():
         if document.id in seen_docs:
+            continue
+        if is_archived_period(document.period, cutoff):
             continue
         if document.status in ("duplicate", "error", "pago"):
             continue
@@ -676,13 +682,20 @@ def attention_counts(session):
     for category in session.exec(select(Category)).all():
         if category.id is not None:
             categories[category.id] = category.code
+    cutoff = first_statement_month(session)
     review = 0
     suspect = 0
     for document in session.exec(select(Document)).all():
+        if is_archived_period(document.period, cutoff):
+            continue
         code = categories.get(document.category_id)
         if document.status == "review":
             review += 1
         if is_suspect_document(document, code):
             suspect += 1
-    pending = len(session.exec(select(OpenItem).where(OpenItem.status == "open")).all())
+    pending = 0
+    for item in session.exec(select(OpenItem).where(OpenItem.status == "open")).all():
+        if is_archived_period(item.period, cutoff):
+            continue
+        pending += 1
     return {"pending": pending, "review": review, "suspect": suspect}

@@ -13,12 +13,16 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 from sqlmodel import Session, select
 
+from app.archive import settle_historical_periods
 from app.db import DB_PATH, ROOT, engine, init_db
+from app.i18n import text
 from app.link_all import _approval_reason
 from app.linker import link_all
 from app.load_history import load_history
 from app.main import app
 from app.models import BankLine, OpenItem, Period
+from app.pending import drop_confirm_tasks_for_linked_documents
+from app.present import agenda_groups, agenda_rows, attention_counts
 from app.process_all import format_summary, process_all
 from app.statements import import_statement_text
 
@@ -92,6 +96,34 @@ def _pending_rows():
             "bank_lines": len(lines),
             "pending": rows,
         }
+
+
+def _print_home_and_agenda():
+    # type: () -> None
+    """Counters and agenda groups as the Portuguese Início and Agenda pages show them."""
+    lang = "pt"
+    with Session(engine) as session:
+        counts = attention_counts(session)
+        print("Início")
+        print("  %s: %d" % (text(lang, "dash_pending"), counts["pending"]))
+        print("  %s: %d" % (text(lang, "dash_review"), counts["review"]))
+        print("  %s: %d" % (text(lang, "dash_suspect"), counts["suspect"]))
+        groups = agenda_groups(agenda_rows(session, lang))
+    print("Agenda")
+    for key, label in (
+        ("late", "agenda_overdue"),
+        ("week", "agenda_week"),
+        ("later", "agenda_later"),
+    ):
+        rows = groups[key]
+        print("  %s (%d)" % (text(lang, label), len(rows)))
+        for row in rows:
+            who = row.get("who") or ""
+            due = row.get("due") or ""
+            print(
+                "    - %s | %s | %s | %s"
+                % (due, row.get("what") or "", who, row.get("amount") or "")
+            )
 
 
 def _close_with_owner():
@@ -168,6 +200,18 @@ def main():
     print(json.dumps(counts, indent=2, ensure_ascii=False))
     print("")
 
+    print("Archived periods before the first imported bank statement")
+    with Session(engine, expire_on_commit=False) as session:
+        archived = settle_historical_periods(session)
+    print(json.dumps(archived, indent=2, ensure_ascii=False))
+    print("")
+
+    print("Removed confirm tasks for documents already fully linked")
+    with Session(engine, expire_on_commit=False) as session:
+        removed = drop_confirm_tasks_for_linked_documents(session)
+    print("removed: %d" % removed)
+    print("")
+
     if args.closed:
         print("Accepted the pending items and closed %s" % MONTH)
         closed = _close_with_owner()
@@ -179,6 +223,8 @@ def main():
     print("")
     state = _pending_rows()
     print(json.dumps(state, indent=2, ensure_ascii=False))
+    print("")
+    _print_home_and_agenda()
 
 
 if __name__ == "__main__":
