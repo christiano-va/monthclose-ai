@@ -27,6 +27,17 @@ MONTH = "2026-09"
 PENDING_KINDS = ("missing_document", "missing_sales_invoice", "invoice_to_request")
 
 
+def clear_uploads():
+    # type: () -> None
+    """Phone photos are not part of the rebuilt books."""
+    folder = ROOT / "data" / "uploads"
+    if not folder.is_dir():
+        return
+    for path in folder.iterdir():
+        if path.is_file():
+            path.unlink()
+
+
 def drop_database():
     # type: () -> None
     """Close every connection and delete the SQLite file."""
@@ -130,6 +141,8 @@ def main():
 
     print("Dropped %s" % DB_PATH.name)
     drop_database()
+    clear_uploads()
+    print("Cleared data/uploads")
 
     print("Loaded history")
     history = load_history()

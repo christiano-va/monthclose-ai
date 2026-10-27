@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import pdfplumber
 from sqlmodel import Session, select
 
+from app.i18n import generation_clause
 from app.llm import llm_json
 from app.mailbox import MailMessage
 from app.models import Category, Document
@@ -234,6 +235,7 @@ def _extraction_lines(message, opening):
         "For other (a reimbursement note): payee_name is the manager or partner being reimbursed and issuer_name is the company when the company prepared the note. amount and total_payable are the total to transfer. Lines are the expenses with vat 0. vat_per_rate is empty. settles_invoice is false. A reimbursement to that person's own account is a normal flow.",
         "confidence is 0-1. Lower it when the text is ambiguous or a figure is unclear.",
         "justification is one line.",
+        generation_clause(),
         "risk_flags may contain only these names: iban_new, iban_changed, urgency_language, short_payment_deadline, personal_account.",
         "iban_new or iban_changed only when the document says the bank account is new, updated, or different from the usual one. A normal payment IBAN printed on an invoice is not a flag.",
         "urgency_language only for pressure or threat wording (URGENTE, suspensão, last chance). A normal due date, including one forwarded by the accountant, is not urgency.",
@@ -319,6 +321,7 @@ def extract_image_document(image_bytes, message, categories, mime="image/jpeg"):
             "description includes the payment method if it is printed (numerario, dinheiro, multibanco, cartao).",
             "suggested_category and conta_snc are null.",
             "confidence is 0 to 1. justification is one line.",
+            generation_clause(),
             "risk_flags is empty unless the page shows a new IBAN, urgency, a very short deadline, or payment to a private account.",
             "Owner note: %s" % (note or "(none)"),
         ]
@@ -382,6 +385,7 @@ def classify_unknown_issuer(extracted, categories, pdf_text_value, message):
             "A fictional footer, an unknown NIF, or low confidence is not fraud and is not a category.",
             "Do not answer UNMAPPED for an IRS withholding guide.",
             "confidence is 0-1 for this classification. justification is one line.",
+            generation_clause(),
             "",
             "direction: %s" % (extracted.get("direction") or ""),
             "document_kind: %s" % (extracted.get("document_kind") or ""),
@@ -502,6 +506,7 @@ def classify_plain_email(message):
             "invoice_to_request is true only when the body says hours were approved or asks the company to issue an invoice.",
             "counterparty is the client or sender organisation, or null.",
             "summary is one line. confidence is 0-1. justification is one line.",
+            generation_clause(),
             "Do not invent an amount.",
             "",
             "From: %s" % (message.sender or ""),

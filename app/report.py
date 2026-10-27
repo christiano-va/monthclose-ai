@@ -27,13 +27,33 @@ from app.posting import (
     suspect_flags,
 )
 from app.i18n import text
+from app.present import (
+    category_label,
+    flag_list,
+    item_heading,
+    method_label,
+    plain_reason,
+    polish_summary,
+    tipo_label,
+)
 from app.settings import company_name
-from app.ui import esc, long_date, month_status_label, month_title, render_page, show_date
+from app.ui import (
+    esc,
+    long_date,
+    month_name_year,
+    month_status_label,
+    month_title,
+    render_page,
+    report_href,
+    show_amount,
+    show_date,
+)
 
 logger = logging.getLogger("app.report")
 
 CACHE_DIR = ROOT / "data" / "cache" / "report_summaries"
-PROMPT_VERSION = "2026-10-26-v3"
+PROMPT_VERSION = "2026-10-26-v4"
+_LEGACY_PROMPTS = ("2026-10-26-v3",)
 DUE_WINDOW_DAYS = 30
 
 _MONTHS = (
@@ -330,13 +350,20 @@ def collect_report(session, month, today=None):
         if name not in seen:
             methods.append({"method": name, "count": method_counts[name]})
 
+    documents_by_id = {}
+    for document in documents:
+        if document.id is not None:
+            documents_by_id[document.id] = document
     open_items = []
     accepted = []
     for item in items:
+        linked = documents_by_id.get(item.document_id)
         row = {
             "id": item.id,
             "kind": item.kind,
             "description": _one_line(item.description),
+            "notes": item.notes or "",
+            "entity": linked.entity if linked is not None else "",
             "amount": money_or_unknown(item.amount),
             "reason": _one_line(item.approval_reason),
             "approved_by": item.approved_by or "",
@@ -411,10 +438,20 @@ def collect_report(session, month, today=None):
     return {"figures": figures, "detail": detail}
 
 
+def _figures_payload(figures):
+    # type: (Dict[str, Any]) -> str
+    return json.dumps(figures, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+
+
 def figures_hash(figures):
     # type: (Dict[str, Any]) -> str
-    payload = json.dumps(figures, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
-    material = PROMPT_VERSION + "\n" + payload
+    material = PROMPT_VERSION + "\n" + _figures_payload(figures)
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()
+
+
+def _hash_for(version, figures):
+    # type: (str, Dict[str, Any]) -> str
+    material = version + "\n" + _figures_payload(figures)
     return hashlib.sha256(material.encode("utf-8")).hexdigest()
 
 
@@ -423,8 +460,18 @@ def _cache_path(month, lang):
     return CACHE_DIR / ("%s.%s.json" % (month, lang))
 
 
-def _read_cache(month, lang, digest):
-    # type: (str, str, str) -> Optional[Dict[str, Any]]
+def _cache_matches(stored_hash, figures):
+    # type: (object, Dict[str, Any]) -> bool
+    if stored_hash == figures_hash(figures):
+        return True
+    for version in _LEGACY_PROMPTS:
+        if stored_hash == _hash_for(version, figures):
+            return True
+    return False
+
+
+def _read_cache(month, lang, figures):
+    # type: (str, str, Dict[str, Any]) -> Optional[Dict[str, Any]]
     path = _cache_path(month, lang)
     if not path.is_file():
         return None
@@ -432,9 +479,7 @@ def _read_cache(month, lang, digest):
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
-    if not isinstance(data, dict):
-        return None
-    if data.get("figures_hash") != digest or data.get("prompt_version") != PROMPT_VERSION:
+    if not isinstance(data, dict) or not _cache_matches(data.get("figures_hash"), figures):
         return None
     summary = (data.get("summary") or "").strip()
     if not summary:
@@ -481,6 +526,8 @@ def _summary_prompt(figures, lang):
     return (
         "Write the executive summary for the monthly report.\n"
         "%s\n"
+        "Reply with the summary sentences only. Do not add a title, a confidence score, "
+        "a justification, a sentence count, or any note about these instructions.\n"
         "Use only the figures in the JSON. They were computed by code.\n"
         "Do not add, subtract, multiply, divide, or round.\n"
         "Do not state a profit, a margin, a result, or any difference.\n"
@@ -490,7 +537,8 @@ def _summary_prompt(figures, lang):
         "Mention the month, whether it is open or closed, revenue, expenses, the VAT position, "
         "the bank balances, and how many bank lines and pending items still need attention.\n"
         "Write as you would to the owner, in ordinary sentences, not as a list of field names.\n"
-        "You may name the largest expense category. Do not list every category.\n\n"
+        "You may name the largest expense category. Do not list every category.\n"
+        "Do not write internal category codes. Use the category name if one is given.\n\n"
         "Figures:\n%s"
     ) % (audience, blob)
 
@@ -499,7 +547,7 @@ def executive_summary(month, figures, lang="pt"):
     # type: (str, Dict[str, Any], str) -> Dict[str, Any]
     """Return the cached prose for this language when the figures hash matches."""
     digest = figures_hash(figures)
-    cached = _read_cache(month, lang, digest)
+    cached = _read_cache(month, lang, figures)
     if cached is not None:
         logger.info("report summary cache hit %s %s", month, lang)
         return cached
@@ -542,6 +590,34 @@ def _paragraphs(text):
     return chunks
 
 
+_MONEY_FIGURES = (
+    "revenue_net",
+    "expenses_net",
+    "vat_on_sales",
+    "deductible_vat",
+    "vat_to_pay",
+    "vat_to_recover",
+    "bank_balance_start",
+    "bank_balance_end",
+    "largest_expense_amount",
+)
+
+
+def _show_figure(lang, key, value):
+    # type: (str, str, object) -> str
+    if value is None:
+        return "—"
+    if value is True:
+        return text(lang, "word_yes")
+    if value is False:
+        return text(lang, "word_no")
+    if key == "largest_expense_category":
+        return category_label(lang, value)
+    if key in _MONEY_FIGURES:
+        return show_amount(lang, value)
+    return str(value)
+
+
 def _figure_rows(figures, lang):
     # type: (Dict[str, Any], str) -> List[Tuple[str, str]]
     labels = (
@@ -568,28 +644,31 @@ def _figure_rows(figures, lang):
     )
     rows = []  # type: List[Tuple[str, str]]
     for key in labels:
-        value = figures.get(key)
-        if value is None:
-            shown = "—"
-        elif value is True:
-            shown = text(lang, "word_yes")
-        elif value is False:
-            shown = text(lang, "word_no")
-        else:
-            shown = str(value)
-        rows.append((text(lang, "fig_%s" % key), shown))
+        rows.append((text(lang, "fig_%s" % key), _show_figure(lang, key, figures.get(key))))
     return rows
 
 
-def _empty_row(colspan, text):
+def _empty_row(colspan, message):
     # type: (int, str) -> str
-    return "<tr><td colspan='%d'>%s</td></tr>" % (colspan, _esc(text))
+    return "<tr><td data-label='' colspan='%d'>%s</td></tr>" % (colspan, _esc(message))
+
+
+def _cells(pairs):
+    # type: (List[Tuple[str, object, bool]]) -> str
+    bits = []
+    for header, value, numeric in pairs:
+        cls = " class='num'" if numeric else ""
+        bits.append("<td data-label='%s'%s>%s</td>" % (_esc(header), cls, _esc(value)))
+    return "<tr>%s</tr>" % "".join(bits)
 
 
 def _table(headers, rows_html):
     # type: (List[str], str) -> str
     head = "".join("<th>%s</th>" % _esc(header) for header in headers)
-    return "<table><thead><tr>%s</tr></thead><tbody>%s</tbody></table>" % (head, rows_html)
+    return (
+        "<table class='stack'><thead><tr>%s</tr></thead><tbody>%s</tbody></table>"
+        % (head, rows_html)
+    )
 
 
 def render_monthly_report(session, month, lang="pt", months=None, today=None):
@@ -598,15 +677,61 @@ def render_monthly_report(session, month, lang="pt", months=None, today=None):
     figures = packed["figures"]
     detail = packed["detail"]
     written = executive_summary(month, figures, lang)
-    body = _render_html(figures, detail, written, lang)
+    body = _render_html(figures, detail, written, lang, months or [month])
     if not months:
         months = [month]
     title = "%s — %s" % (text(lang, "report_kicker"), month_title(lang, month))
     return render_page(lang, "report", month, months, title, body, "/report/%s/view" % month, wide=True)
 
 
-def _render_html(figures, detail, written, lang):
-    # type: (Dict[str, Any], Dict[str, Any], Dict[str, Any], str) -> str
+def _month_switch(lang, month, months, status_label, closed):
+    # type: (str, str, List[str], str, bool) -> str
+    ordered = sorted(set(months or [month]))
+    if month not in ordered:
+        ordered.append(month)
+        ordered.sort()
+    index = ordered.index(month)
+    older = ordered[index - 1] if index > 0 else ""
+    newer = ordered[index + 1] if index + 1 < len(ordered) else ""
+
+    def arrow(target, symbol, label):
+        # type: (str, str, str) -> str
+        if not target:
+            return "<span class='month-arrow is-disabled' aria-hidden='true'>%s</span>" % symbol
+        return "<a class='month-arrow' href='%s' aria-label='%s'>%s</a>" % (
+            _esc(report_href(target, lang)),
+            _esc(label),
+            symbol,
+        )
+
+    items = []
+    for name in sorted(ordered, reverse=True):
+        current = " aria-current='page'" if name == month else ""
+        items.append(
+            "<li><a href='%s'%s>%s</a></li>"
+            % (_esc(report_href(name, lang)), current, _esc(month_name_year(lang, name)))
+        )
+    tone = "resolved" if closed else "pending"
+    return """
+<div class="month-switch no-print">
+  %s
+  <button type="button" id="month-toggle" aria-expanded="false" aria-controls="month-list">%s</button>
+  %s
+  <span class="chip chip-%s">%s</span>
+</div>
+<ul id="month-list" class="month-list" hidden>%s</ul>
+""" % (
+        arrow(older, "‹", text(lang, "month_prev")),
+        _esc(month_name_year(lang, month)),
+        arrow(newer, "›", text(lang, "month_next")),
+        tone,
+        _esc(status_label),
+        "".join(items),
+    )
+
+
+def _render_html(figures, detail, written, lang, months):
+    # type: (Dict[str, Any], Dict[str, Any], Dict[str, Any], str, List[str]) -> str
     month = figures["month"]
     title = month_title(lang, month)
     raw_status = figures.get("status") or "open"
@@ -616,94 +741,117 @@ def _render_html(figures, detail, written, lang):
     running = "%s · %s · %s" % (company, title, status)
 
     summary_bits = []
-    for paragraph in _paragraphs(written.get("summary") or ""):
+    for paragraph in _paragraphs(polish_summary(lang, written.get("summary") or "")):
         summary_bits.append("<p>%s</p>" % _esc(paragraph))
     if not summary_bits:
         summary_bits.append("<p>%s</p>" % _esc(text(lang, "report_summary_failed")))
-    confidence = written.get("confidence")
-    justification = written.get("justification") or ""
-    if confidence is not None or justification:
-        summary_bits.append(
-            "<p class='quiet'>%s</p>"
-            % _esc(
-                text(
-                    lang,
-                    "report_confidence",
-                    confidence="" if confidence is None else confidence,
-                    why=justification,
-                )
-            )
-        )
-    cache_label = ""
-    if written.get("cache") == "hit":
-        cache_label = text(lang, "report_cached")
-    elif written.get("cache") == "miss":
-        cache_label = text(lang, "report_written")
-    if cache_label:
-        summary_bits.append("<p class='quiet'>%s</p>" % _esc(cache_label))
 
     figure_html = []
     for label, value in _figure_rows(figures, lang):
         figure_html.append(
-            "<tr><th>%s</th><td>%s</td></tr>" % (_esc(label), _esc(value))
+            "<tr><th>%s</th><td data-label='%s'>%s</td></tr>"
+            % (_esc(label), _esc(label), _esc(value))
         )
     for row in figures.get("expenses_by_category") or []:
+        category_name = text(
+            lang,
+            "fig_category",
+            name=category_label(lang, row["category"]),
+            tipo=tipo_label(lang, row["tipo"]) or row["tipo"],
+        )
         figure_html.append(
-            "<tr><th>%s</th><td>%s</td></tr>"
-            % (
-                _esc(text(lang, "fig_category", name=row["category"], tipo=row["tipo"])),
-                _esc(row["amount"]),
-            )
+            "<tr><th>%s</th><td data-label='%s'>%s</td></tr>"
+            % (_esc(category_name), _esc(category_name), _esc(show_amount(lang, row["amount"])))
         )
 
+    cat_headers = [text(lang, "th_category"), text(lang, "th_type"), text(lang, "th_amount")]
     category_rows = []
     for row in figures.get("expenses_by_category") or []:
         category_rows.append(
-            "<tr><td>%s</td><td>%s</td><td class='num'>%s</td></tr>"
-            % (_esc(row["category"]), _esc(row["tipo"]), _esc(row["amount"]))
+            _cells(
+                [
+                    (cat_headers[0], category_label(lang, row["category"]), False),
+                    (cat_headers[1], tipo_label(lang, row["tipo"]) or row["tipo"], False),
+                    (cat_headers[2], show_amount(lang, row["amount"]), True),
+                ]
+            )
         )
     if not category_rows:
         category_rows.append(_empty_row(3, text(lang, "report_no_expenses")))
 
+    method_headers = [text(lang, "th_method"), text(lang, "th_links")]
     method_rows = []
     for row in detail["methods"]:
+        if not row["count"]:
+            continue
         method_rows.append(
-            "<tr><td>%s</td><td class='num'>%s</td></tr>"
-            % (_esc(row["method"]), _esc(row["count"]))
+            _cells(
+                [
+                    (method_headers[0], method_label(lang, row["method"]), False),
+                    (method_headers[1], row["count"], True),
+                ]
+            )
         )
+    line_headers = [
+        text(lang, "th_line"),
+        text(lang, "th_date"),
+        text(lang, "th_amount"),
+        text(lang, "th_description"),
+    ]
     unsupported_rows = []
     for row in detail["unsupported"]:
         unsupported_rows.append(
-            "<tr><td>%s</td><td>%s</td><td class='num'>%s</td><td>%s</td></tr>"
-            % (_esc(row["id"]), _esc(show_date(lang, row["date"])), _esc(row["amount"]), _esc(row["description"]))
+            _cells(
+                [
+                    (line_headers[0], row["id"], False),
+                    (line_headers[1], show_date(lang, row["date"]), False),
+                    (line_headers[2], show_amount(lang, row["amount"]), True),
+                    (line_headers[3], row["description"], False),
+                ]
+            )
         )
     if not unsupported_rows:
         unsupported_rows.append(_empty_row(4, text(lang, "report_all_supported")))
 
+    def _item_label(row):
+        # type: (Dict[str, Any]) -> str
+        heading = item_heading(
+            lang,
+            row.get("kind"),
+            row.get("notes") or "",
+            row.get("description") or row.get("item") or "",
+            row.get("entity") or "",
+        )
+        if heading["who"] and heading["who"] != heading["what"]:
+            return "%s · %s" % (heading["what"], heading["who"])
+        return heading["what"]
+
     def _pending_rows(rows, with_reason):
         # type: (List[Dict[str, Any]], bool) -> str
+        kind_h = text(lang, "th_kind")
+        item_h = text(lang, "th_item")
+        amount_h = text(lang, "th_amount")
         built = []
         for row in rows:
-            extra = ""
-            if with_reason:
-                extra = "<td>%s</td><td>%s</td><td>%s</td>" % (
-                    _esc(row["reason"] or "—"),
-                    _esc(row["approved_by"] or "—"),
-                    _esc(row["date"] or "—"),
-                )
-            risk = ""
+            from app.ui import kind_label
+
+            label = _item_label(row)
             if row.get("risk"):
-                risk = text(lang, "report_legal")
-            built.append(
-                "<tr><td>%s</td><td>%s%s</td><td class='num'>%s</td>%s</tr>"
-                % (
-                    _esc(row["kind"]),
-                    _esc(row["description"]),
-                    _esc(risk),
-                    _esc(row["amount"]),
-                    extra,
+                label = "%s%s" % (label, text(lang, "report_legal"))
+            pairs = [
+                (kind_h, kind_label(lang, row.get("kind")), False),
+                (item_h, label, False),
+                (amount_h, show_amount(lang, row.get("amount")), True),
+            ]
+            if with_reason:
+                pairs.extend(
+                    [
+                        (text(lang, "th_reason"), plain_reason(lang, row.get("reason") or "") or "—", False),
+                        (text(lang, "th_approved"), row.get("approved_by") or "—", False),
+                        (text(lang, "th_date"), show_date(lang, row.get("date")) or "—", False),
+                    ]
                 )
-            )
+            built.append(_cells(pairs))
         return "".join(built)
 
     open_body = _pending_rows(detail["open_items"], False)
@@ -713,69 +861,120 @@ def _render_html(figures, detail, written, lang):
     if not accepted_body:
         accepted_body = _empty_row(6, text(lang, "report_no_accepted"))
 
+    resolved_headers = [
+        text(lang, "th_date"),
+        text(lang, "th_document"),
+        text(lang, "th_amount"),
+        text(lang, "th_item"),
+    ]
     resolved_rows = []
     for row in detail["resolved"]:
         number = row["number"] or text(lang, "report_doc_fallback", id=row["document_id"])
         resolved_rows.append(
-            "<tr><td>%s</td><td>%s</td><td class='num'>%s</td><td>%s</td></tr>"
-            % (_esc(show_date(lang, row["date"])), _esc(number), _esc(row["amount"]), _esc(row["item"]))
+            _cells(
+                [
+                    (resolved_headers[0], show_date(lang, row["date"]), False),
+                    (resolved_headers[1], number, False),
+                    (resolved_headers[2], show_amount(lang, row["amount"]), True),
+                    (resolved_headers[3], plain_reason(lang, row["item"]) or row["item"], False),
+                ]
+            )
         )
     if not resolved_rows:
         resolved_rows.append(_empty_row(4, text(lang, "report_no_resolved")))
 
+    suspect_headers = [
+        text(lang, "th_date"),
+        text(lang, "th_counterparty"),
+        text(lang, "th_number"),
+        text(lang, "th_total"),
+        text(lang, "th_signals"),
+        text(lang, "th_why"),
+    ]
     suspect_rows = []
     for row in detail["suspects"]:
         suspect_rows.append(
-            "<tr><td>%s</td><td>%s</td><td>%s</td><td class='num'>%s</td><td>%s</td><td>%s</td></tr>"
-            % (
-                _esc(show_date(lang, row["date"])),
-                _esc(row["entity"]),
-                _esc(row["number"]),
-                _esc(row["total"]),
-                _esc(row["flags"]),
-                _esc(row["justification"]),
+            _cells(
+                [
+                    (suspect_headers[0], show_date(lang, row["date"]), False),
+                    (suspect_headers[1], row["entity"], False),
+                    (suspect_headers[2], row["number"], False),
+                    (suspect_headers[3], show_amount(lang, row["total"]), True),
+                    (suspect_headers[4], flag_list(lang, row["flags"]), False),
+                    (suspect_headers[5], plain_reason(lang, row["justification"]), False),
+                ]
             )
         )
     if not suspect_rows:
         suspect_rows.append(_empty_row(6, text(lang, "report_no_suspects")))
 
+    review_headers = [
+        text(lang, "th_date"),
+        text(lang, "th_counterparty"),
+        text(lang, "th_number"),
+        text(lang, "th_total"),
+        text(lang, "th_why"),
+    ]
     review_rows = []
     for row in detail["reviews"]:
         review_rows.append(
-            "<tr><td>%s</td><td>%s</td><td>%s</td><td class='num'>%s</td><td>%s</td></tr>"
-            % (
-                _esc(show_date(lang, row["date"])),
-                _esc(row["entity"]),
-                _esc(row["number"]),
-                _esc(row["total"]),
-                _esc(row["justification"]),
+            _cells(
+                [
+                    (review_headers[0], show_date(lang, row["date"]), False),
+                    (review_headers[1], row["entity"], False),
+                    (review_headers[2], row["number"], False),
+                    (review_headers[3], show_amount(lang, row["total"]), True),
+                    (review_headers[4], plain_reason(lang, row["justification"]), False),
+                ]
             )
         )
     if not review_rows:
         review_rows.append(_empty_row(5, text(lang, "report_no_reviews")))
 
+    credit_headers = [
+        text(lang, "th_date"),
+        text(lang, "th_credit"),
+        text(lang, "th_invoice"),
+        text(lang, "th_invoice_total"),
+        text(lang, "th_credit_amount"),
+        text(lang, "th_payable"),
+        text(lang, "th_issuer"),
+    ]
     credit_rows = []
     for row in detail["credits"]:
         credit_rows.append(
-            "<tr><td>%s</td><td>%s</td><td>%s</td><td class='num'>%s</td><td class='num'>%s</td><td class='num'>%s</td><td>%s</td></tr>"
-            % (
-                _esc(show_date(lang, row.get("date") or "")),
-                _esc(row.get("credit_note") or ""),
-                _esc(row.get("invoice") or ""),
-                _esc(row.get("invoice_total") or ""),
-                _esc(row.get("credit") or ""),
-                _esc(row.get("amount_payable") or ""),
-                _esc(row.get("issuer") or ""),
+            _cells(
+                [
+                    (credit_headers[0], show_date(lang, row.get("date") or ""), False),
+                    (credit_headers[1], row.get("credit_note") or "", False),
+                    (credit_headers[2], row.get("invoice") or "", False),
+                    (credit_headers[3], show_amount(lang, row.get("invoice_total")), True),
+                    (credit_headers[4], show_amount(lang, row.get("credit")), True),
+                    (credit_headers[5], show_amount(lang, row.get("amount_payable")), True),
+                    (credit_headers[6], row.get("issuer") or "", False),
+                ]
             )
         )
     if not credit_rows:
         credit_rows.append(_empty_row(7, text(lang, "report_no_credits")))
 
+    due_headers = [
+        text(lang, "th_due"),
+        text(lang, "th_number"),
+        text(lang, "th_counterparty"),
+        text(lang, "th_total"),
+    ]
     due_rows = []
     for row in detail["dues"]:
         due_rows.append(
-            "<tr><td>%s</td><td>%s</td><td>%s</td><td class='num'>%s</td></tr>"
-            % (_esc(show_date(lang, row["due"])), _esc(row["number"]), _esc(row["entity"]), _esc(row["total"]))
+            _cells(
+                [
+                    (due_headers[0], show_date(lang, row["due"]), False),
+                    (due_headers[1], row["number"], False),
+                    (due_headers[2], row["entity"], False),
+                    (due_headers[3], show_amount(lang, row["total"]), True),
+                ]
+            )
         )
     if not due_rows:
         due_rows.append(_empty_row(4, text(lang, "report_no_due")))
@@ -787,6 +986,8 @@ def _render_html(figures, detail, written, lang):
         vat_value = figures.get("vat_to_recover")
     if vat_value is None:
         vat_value = "—"
+    else:
+        vat_value = show_amount(lang, vat_value)
 
 
     recon = text(
@@ -809,10 +1010,14 @@ def _render_html(figures, detail, written, lang):
       %s
       <p class="footer-note">%s</p>
     </div>
-    <aside>
-      <h3>%s</h3>
-      <div class="table-wrap"><table class="figures"><tbody>%s</tbody></table></div>
-    </aside>
+    <details class="calc-values no-print">
+      <summary>%s</summary>
+      <div class="table-wrap"><table class="stack figures"><tbody>%s</tbody></table></div>
+    </details>
+  </div>
+  <div class="print-only">
+    <h3>%s</h3>
+    <div class="table-wrap"><table class="figures"><tbody>%s</tbody></table></div>
   </div>
 </section>
 <section class="sheet">
@@ -874,21 +1079,23 @@ def _render_html(figures, detail, written, lang):
         _esc(text(lang, "report_summary")),
         "".join(summary_bits),
         _esc(text(lang, "report_ai_note")),
+        _esc(text(lang, "report_figures_toggle")),
+        "".join(figure_html),
         _esc(text(lang, "report_figures_used")),
         "".join(figure_html),
         _esc(running),
         _esc(text(lang, "report_key")),
         _esc(text(lang, "report_figure_note")),
         _esc(text(lang, "report_revenue")),
-        _esc(figures.get("revenue_net")),
+        _esc(show_amount(lang, figures.get("revenue_net"))),
         _esc(text(lang, "report_expenses")),
-        _esc(figures.get("expenses_net")),
+        _esc(show_amount(lang, figures.get("expenses_net"))),
         _esc(vat_label),
         _esc(vat_value),
         _esc(text(lang, "report_bank_start")),
-        _esc(figures.get("bank_balance_start") if figures.get("bank_balance_start") is not None else "—"),
+        _esc(show_amount(lang, figures.get("bank_balance_start")) if figures.get("bank_balance_start") is not None else "—"),
         _esc(text(lang, "report_bank_end")),
-        _esc(figures.get("bank_balance_end") if figures.get("bank_balance_end") is not None else "—"),
+        _esc(show_amount(lang, figures.get("bank_balance_end")) if figures.get("bank_balance_end") is not None else "—"),
         _esc(text(lang, "report_by_category")),
         _table(
             [text(lang, "th_category"), text(lang, "th_type"), text(lang, "th_amount")],
@@ -989,4 +1196,5 @@ def _render_html(figures, detail, written, lang):
             "".join(due_rows),
         ),
     )
-    return sheets
+    switch = _month_switch(lang, month, months, status, raw_status == "closed")
+    return switch + sheets

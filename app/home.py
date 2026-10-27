@@ -1,149 +1,63 @@
-"""Browser dashboard. The JSON service root stays available for API clients."""
-from datetime import date, timedelta
-from typing import Any, Dict, List
+"""Browser home. The JSON service root stays available for API clients."""
+from typing import Any, Dict
 
 from app.i18n import text
 from app.posting import note_value
+from app.present import agenda_rows, attention_counts, home_preview, render_agenda_row
 from app.ui import (
-    chip,
     esc,
+    month_name_year,
     month_status_label,
-    month_title,
     page_href,
     parse_note_date,
+    relative_time,
     render_page,
-    show_amount,
-    show_date,
 )
 
 
-def _sync_line(lang, sync):
+def _sync_label(lang, sync):
     # type: (str, Dict[str, Any]) -> str
-    if sync.get("running"):
-        return text(lang, "dash_sync_running")
     last = sync.get("last") or {}
-    if not isinstance(last, dict):
-        return text(lang, "dash_sync_none")
-    finished = last.get("finished_at") or ""
-    error = last.get("error") or ""
-    if finished and error:
-        return text(lang, "dash_sync_last_error", when=finished, error=error)
-    if finished:
-        return text(lang, "dash_sync_last", when=finished)
-    return text(lang, "dash_sync_none")
+    if not isinstance(last, dict) or not last.get("finished_at"):
+        return text(lang, "sync_never")
+    when = relative_time(lang, last.get("finished_at"))
+    if last.get("error"):
+        if when:
+            return "%s · %s" % (text(lang, "sync_failed_short"), when)
+        return text(lang, "sync_failed_short")
+    if when:
+        return text(lang, "sync_updated", when=when)
+    return text(lang, "sync_never")
 
 
-def _due_rows(lang, payload):
-    # type: (str, Dict[str, Any]) -> List[Dict[str, str]]
-    today = date.today()
-    horizon = today + timedelta(days=30)
-    found = []  # type: List[Dict[str, str]]
-    seen = set()
-    for item in payload.get("pending") or []:
-        due = parse_note_date(item.get("due"))
-        if due is None or due < today or due > horizon:
-            continue
-        label = item.get("description") or ""
-        key = (due.isoformat(), label)
-        if key in seen:
-            continue
-        seen.add(key)
-        found.append(
-            {
-                "due": due.isoformat(),
-                "label": label,
-                "amount": show_amount(lang, item.get("amount")),
-            }
-        )
-    for row in payload.get("dues") or []:
-        due = parse_note_date(row.get("due"))
-        if due is None or due < today or due > horizon:
-            continue
-        label = row.get("label") or ""
-        key = (due.isoformat(), label)
-        if key in seen:
-            continue
-        seen.add(key)
-        found.append(
-            {
-                "due": due.isoformat(),
-                "label": label,
-                "amount": show_amount(lang, row.get("amount")),
-            }
-        )
-    found.sort(key=lambda row: (row["due"], row["label"]))
-    return found[:5]
-
-
-def _checklist_items(lang, checklist):
-    # type: (str, Dict[str, Any]) -> List[str]
-    lines = []  # type: List[str]
-    grouped = checklist.get("blockers_by_kind") or {}
-    for row in grouped.get("unsupported_bank_line") or []:
-        lines.append(
-            text(
-                lang,
-                "dash_line_item",
-                date=show_date(lang, row.get("date")),
-                amount=show_amount(lang, row.get("amount")),
-                description=row.get("description") or "",
-            )
-        )
-    for kind in ("missing_document", "missing_sales_invoice"):
-        for row in grouped.get(kind) or []:
-            lines.append(
-                text(
-                    lang,
-                    "dash_task_item",
-                    amount=show_amount(lang, row.get("amount")),
-                    description=row.get("item") or "",
-                )
-            )
-    return lines[:6]
-
-
-def render_home(payload, lang):
-    # type: (Dict[str, Any], str) -> str
+def render_home(session, payload, lang):
+    # type: (object, Dict[str, Any], str) -> str
     month = payload["month"]
     checklist = payload["checklist"]
     status = checklist.get("status") or "missing"
-    pending_count = len(payload.get("pending") or [])
-    review = payload.get("review") or 0
-    suspect = payload.get("suspect") or 0
-    report_href = "/report/%s/view?lang=%s" % (month, lang)
+    if status not in ("open", "closed"):
+        status = "open"
+    counts = attention_counts(session)
     pending_href = page_href("/pending", month, lang)
-    scan_href = page_href("/scan", month, lang)
-
-    dues = _due_rows(lang, payload)
-    if dues:
-        due_html = "<ul class='dues'>%s</ul>" % "".join(
-            "<li><strong>%s</strong> · %s<p>%s</p></li>"
-            % (esc(show_date(lang, row["due"])), esc(row["amount"]), esc(row["label"]))
-            for row in dues
+    review_href = page_href("/pending?focus=review", month, lang)
+    suspect_href = page_href("/pending?focus=suspect", month, lang)
+    agenda_href = page_href("/agenda", month, lang)
+    preview = home_preview(agenda_rows(session, lang))
+    if preview:
+        week_html = "<ul class='agenda-list'>%s</ul>" % "".join(
+            render_agenda_row(row, compact=True) for row in preview
         )
     else:
-        due_html = "<p class='quiet'>%s</p>" % esc(text(lang, "dash_dues_empty"))
-
-    clear_html = ""
-    if pending_count == 0 and review == 0 and suspect == 0:
-        clear_html = "<p>%s</p>" % esc(text(lang, "dash_clear"))
+        week_html = "<p class='quiet'>%s</p>" % esc(text(lang, "home_week_empty"))
 
     if status == "closed":
         close_line = text(lang, "dash_closed")
     elif checklist.get("can_close"):
         close_line = text(lang, "dash_can_close")
-    elif _checklist_items(lang, checklist):
+    elif checklist.get("open_items") or checklist.get("unsupported_bank_lines"):
         close_line = text(lang, "dash_blocked")
     else:
         close_line = text(lang, "dash_open")
-
-    list_html = ""
-    if status != "closed":
-        items = _checklist_items(lang, checklist)
-        if items:
-            list_html = "<ul class='checklist'>%s</ul>" % "".join(
-                "<li>%s</li>" % esc(item) for item in items
-            )
 
     close_button = ""
     if checklist.get("can_close") and status == "open":
@@ -159,99 +73,76 @@ def render_home(payload, lang):
             )
         )
 
-    empty_docs = ""
-    if not payload.get("documents"):
-        empty_docs = "<p class='quiet'>%s</p>" % esc(text(lang, "dash_no_documents"))
-
-    counts = text(
+    figures = text(
         lang,
         "dash_lines",
         lines=checklist.get("bank_lines"),
         missing=checklist.get("unsupported_bank_lines"),
         open=checklist.get("open_items"),
     )
+    chip = "<span class='chip chip-%s'>%s</span>" % (
+        "resolved" if status == "closed" else "pending",
+        esc(month_status_label(lang, status)),
+    )
+    running = (payload.get("sync") or {}).get("running")
+    spinner = "<span class='spinner spinner-sm' aria-hidden='true'></span>" if running else "↻"
+    sync_class = "sync-line is-syncing" if running else "sync-line"
 
     body = """
-<section class="attention">
-  <h1>%s</h1>
-  %s
-  <div class="stats">
-    <a class="stat" href="%s"><strong>%s</strong><span>%s</span></a>
-    <a class="stat" href="%s#reviews"><strong>%s</strong><span>%s</span></a>
-    <a class="stat" href="%s#alerts"><strong>%s</strong><span>%s</span></a>
+<h1>%s</h1>
+<div class="stats">
+  <a class="stat" href="%s"><strong>%s</strong><span>%s</span></a>
+  <a class="stat" href="%s"><strong>%s</strong><span>%s</span></a>
+  <a class="stat" href="%s"><strong>%s</strong><span>%s</span></a>
+</div>
+<section class="card">
+  <div class="section-head">
+    <h2>%s</h2>
+    <a href="%s">%s</a>
   </div>
-  <h2>%s</h2>
   %s
 </section>
 <section class="card">
-  <h2>%s %s</h2>
+  <div class="section-head">
+    <h2>%s</h2>
+    %s
+  </div>
   <p>%s</p>
   <p class="quiet">%s</p>
   %s
-  %s
-  %s
 </section>
-<section class="card">
-  <h2>%s</h2>
-  <div class="actions">
-    <a class="btn" href="%s">%s</a>
-    <button type="button" id="sync" data-syncing="%s" data-failed="%s" data-offline="%s">%s</button>
-    <a class="btn btn-ghost span-2" href="%s">%s</a>
-  </div>
-  <p id="sync-status" class="quiet">%s</p>
-</section>
+<p class="%s"><button type="button" id="sync" data-syncing="%s" data-failed="%s">
+  <span id="sync-label">%s</span>
+  <span class="sync-mark" aria-hidden="true">%s</span>
+</button></p>
 """ % (
-        esc(text(lang, "dash_title")),
-        clear_html,
+        esc(text(lang, "nav_home")),
         esc(pending_href),
-        esc(pending_count),
+        esc(counts["pending"]),
         esc(text(lang, "dash_pending")),
-        esc(report_href),
-        esc(review),
+        esc(review_href),
+        esc(counts["review"]),
         esc(text(lang, "dash_review")),
-        esc(report_href),
-        esc(suspect),
+        esc(suspect_href),
+        esc(counts["suspect"]),
         esc(text(lang, "dash_suspect")),
-        esc(text(lang, "dash_dues")),
-        due_html,
-        esc(text(lang, "dash_month")),
-        chip(lang, "validated" if status == "closed" else "pending", ""),
+        esc(text(lang, "home_week")),
+        esc(agenda_href),
+        esc(text(lang, "home_week_link")),
+        week_html,
+        esc(text(lang, "home_close", month=month_name_year(lang, month))),
+        chip,
         esc(close_line),
-        esc(counts),
-        empty_docs,
-        list_html,
+        esc(figures),
         close_button,
-        esc(text(lang, "dash_quick")),
-        esc(scan_href),
-        esc(text(lang, "dash_scan")),
+        sync_class,
         esc(text(lang, "dash_syncing")),
         esc(text(lang, "dash_sync_failed")),
-        esc(text(lang, "error_offline")),
-        esc(text(lang, "dash_sync")),
-        esc(report_href),
-        esc(text(lang, "dash_report")),
-        esc(_sync_line(lang, payload.get("sync") or {})),
+        esc(_sync_label(lang, payload.get("sync") or {})),
+        spinner,
     )
-    # The month chip should say Open or Closed, not Validated/Pending.
-    body = body.replace(
-        chip(lang, "validated" if status == "closed" else "pending", ""),
-        "<span class='chip chip-%s'>%s</span>"
-        % (
-            "resolved" if status == "closed" else "pending",
-            esc(month_status_label(lang, status if status in ("open", "closed") else "open")),
-        ),
-        1,
-    )
-    title = "%s — %s" % (month_title(lang, month), "MonthClose")
-    return render_page(
-        lang,
-        "dashboard",
-        month,
-        payload.get("months") or [month],
-        title,
-        body,
-        "/",
-    )
+    title = "%s — MonthClose" % text(lang, "nav_home")
+    return render_page(lang, "dashboard", month, payload.get("months") or [month], title, body, "/")
 
 
 def document_due(document):

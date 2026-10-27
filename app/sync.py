@@ -5,6 +5,7 @@ The summary is counts only. Message bodies are not returned.
 import json
 import logging
 import threading
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -30,6 +31,9 @@ _KNOWN_STATUS = (
 
 _LOCK = threading.Lock()
 _RUNNING = False
+_SCHEDULED = False
+_INTERVAL_STARTED = False
+SYNC_EVERY_SECONDS = 300
 
 
 class SyncError(Exception):
@@ -128,6 +132,9 @@ def _run_sync():
     from app.owner_drafts import create_owner_drafts
     from app.process_one import process_eml
 
+    from app.i18n import set_generation_lang
+
+    set_generation_lang("pt")
     init_db()
     reset_llm_calls()
     summary = {
@@ -214,6 +221,72 @@ def _run_sync():
     summary["finished_at"] = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
     _save_last(summary)
     return summary
+
+
+def _finished_age():
+    # type: () -> Optional[int]
+    last = _load_last() or {}
+    raw = str(last.get("finished_at") or "").replace("Z", "")
+    if not raw:
+        return None
+    try:
+        stamp = datetime.strptime(raw[:19], "%Y-%m-%dT%H:%M:%S")
+    except ValueError:
+        return None
+    return int((datetime.utcnow() - stamp).total_seconds())
+
+
+def _is_stale():
+    # type: () -> bool
+    age = _finished_age()
+    if age is None:
+        return True
+    return age >= SYNC_EVERY_SECONDS
+
+
+def _safe_sync():
+    # type: () -> None
+    global _SCHEDULED
+    try:
+        run_sync()
+    except SyncError as exc:
+        logger.info("background sync: %s", exc.code)
+    except Exception:
+        logger.exception("background sync failed")
+    finally:
+        with _LOCK:
+            _SCHEDULED = False
+
+
+def maybe_background_sync():
+    # type: () -> None
+    """Start a sync when the last one is older than five minutes. Does not block the page."""
+    global _SCHEDULED
+    with _LOCK:
+        if _RUNNING or _SCHEDULED or not _is_stale():
+            return
+        _SCHEDULED = True
+    thread = threading.Thread(target=_safe_sync, name="sync-view", daemon=True)
+    thread.start()
+
+
+def _sync_loop():
+    # type: () -> None
+    while True:
+        time.sleep(SYNC_EVERY_SECONDS)
+        maybe_background_sync()
+
+
+def start_background_sync():
+    # type: () -> None
+    """Sync every five minutes for as long as the server process is running."""
+    global _INTERVAL_STARTED
+    with _LOCK:
+        if _INTERVAL_STARTED:
+            return
+        _INTERVAL_STARTED = True
+    thread = threading.Thread(target=_sync_loop, name="sync-every-5m", daemon=True)
+    thread.start()
 
 
 def _int_map(values):

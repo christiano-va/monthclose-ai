@@ -3,26 +3,26 @@
   var root = document.documentElement;
   var lang = root.getAttribute("data-lang") || "pt";
 
-  var monthSelect = document.getElementById("month");
-  if (monthSelect) {
-    monthSelect.addEventListener("change", function () {
-      var month = monthSelect.value;
-      var mode = monthSelect.getAttribute("data-month-nav");
-      if (mode === "report") {
-        window.location = "/report/" + encodeURIComponent(month) + "/view?lang=" + encodeURIComponent(lang);
-        return;
-      }
-      var path = window.location.pathname || "/";
-      window.location = path + "?month=" + encodeURIComponent(month) + "&lang=" + encodeURIComponent(lang);
+  var monthToggle = document.getElementById("month-toggle");
+  var monthList = document.getElementById("month-list");
+  if (monthToggle && monthList) {
+    monthToggle.addEventListener("click", function () {
+      var open = monthList.hasAttribute("hidden");
+      if (open) monthList.removeAttribute("hidden");
+      else monthList.setAttribute("hidden", "");
+      monthToggle.setAttribute("aria-expanded", open ? "true" : "false");
     });
   }
 
   var syncButton = document.getElementById("sync");
-  var syncStatus = document.getElementById("sync-status");
-  if (syncButton && syncStatus) {
+  if (syncButton) {
     syncButton.addEventListener("click", function () {
+      var label = document.getElementById("sync-label");
+      var mark = syncButton.querySelector(".sync-mark");
       syncButton.disabled = true;
-      syncStatus.textContent = syncButton.getAttribute("data-syncing") || "";
+      syncButton.classList.add("is-syncing");
+      if (label) label.textContent = syncButton.getAttribute("data-syncing") || "";
+      if (mark) mark.innerHTML = "<span class='spinner spinner-sm' aria-hidden='true'></span>";
       fetch("/sync", {method: "POST", headers: {Accept: "application/json"}})
         .then(function (response) {
           return response.json().then(function (body) {
@@ -31,15 +31,17 @@
         })
         .then(function (result) {
           if (!result.ok) {
-            syncStatus.textContent = syncButton.getAttribute("data-failed") || "";
+            if (label) label.textContent = syncButton.getAttribute("data-failed") || "";
             syncButton.disabled = false;
+            if (mark) mark.textContent = "↻";
             return;
           }
           window.location.reload();
         })
         .catch(function () {
-          syncStatus.textContent = syncButton.getAttribute("data-offline") || syncButton.getAttribute("data-failed") || "";
+          if (label) label.textContent = syncButton.getAttribute("data-failed") || "";
           syncButton.disabled = false;
+          if (mark) mark.textContent = "↻";
         });
     });
   }
@@ -66,9 +68,15 @@
     });
   }
 
+  function openCalculated() {
+    var node = document.querySelector(".calc-values");
+    if (node) node.open = true;
+  }
+  window.addEventListener("beforeprint", openCalculated);
   var printButton = document.getElementById("print-report");
   if (printButton) {
     printButton.addEventListener("click", function () {
+      openCalculated();
       window.print();
     });
   }
@@ -82,13 +90,26 @@
     try { strings = JSON.parse(stringsNode.textContent || "{}"); } catch (error) { strings = {}; }
   }
   var result = document.getElementById("result");
-  var fileInput = document.getElementById("file");
+  var cameraInput = document.getElementById("camera");
+  var libraryInput = document.getElementById("library");
   var noteInput = document.getElementById("note");
+  var notePanel = document.getElementById("note-panel");
+  var addNote = document.getElementById("add-note");
   var codeInput = document.getElementById("code");
   var submitButton = document.getElementById("scan-send");
+  var preview = document.getElementById("preview");
+  var chosen = null;
   var lastError = "";
   var clock = null;
   var startedAt = 0;
+
+  if (addNote && notePanel) {
+    addNote.addEventListener("click", function () {
+      notePanel.hidden = false;
+      addNote.hidden = true;
+      if (noteInput) noteInput.focus();
+    });
+  }
 
   function say(key) {
     return strings[key] || key;
@@ -99,6 +120,27 @@
       return {"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[ch];
     });
   }
+
+  function showPreview(file) {
+    chosen = file;
+    if (submitButton) submitButton.hidden = false;
+    if (!preview) return;
+    if ((file.type || "") === "application/pdf" || /\.pdf$/i.test(file.name || "")) {
+      preview.innerHTML = "<p class='preview-file'>" + esc(file.name || "PDF") + "</p>";
+      return;
+    }
+    var url = URL.createObjectURL(file);
+    preview.innerHTML = "<img alt='' src='" + url + "'>";
+  }
+
+  function watchFile(input) {
+    if (!input) return;
+    input.addEventListener("change", function () {
+      if (input.files && input.files.length) showPreview(input.files[0]);
+    });
+  }
+  watchFile(cameraInput);
+  watchFile(libraryInput);
 
   function elapsedSeconds() {
     return Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
@@ -131,11 +173,11 @@
       codeInput.focus();
       return;
     }
-    if (fileInput && fileInput.files && fileInput.files.length) {
+    if (chosen) {
       submitScan();
       return;
     }
-    if (fileInput) fileInput.focus();
+    if (cameraInput) cameraInput.focus();
   }
 
   var stepOrder = ["uploading", "reading", "validating", "matching", "done"];
@@ -169,6 +211,21 @@
     node.textContent = say("scan_elapsed").replace("%(seconds)s", seconds);
   }
 
+  function resetForm() {
+    chosen = null;
+    if (cameraInput) cameraInput.value = "";
+    if (libraryInput) libraryInput.value = "";
+    if (noteInput) noteInput.value = "";
+    if (preview) preview.innerHTML = "";
+    if (submitButton) {
+      submitButton.hidden = true;
+      submitButton.disabled = false;
+    }
+    if (notePanel) notePanel.hidden = true;
+    if (addNote) addNote.hidden = false;
+    result.innerHTML = "";
+  }
+
   function renderCards(cards) {
     stopClock();
     if (!cards || !cards.length) {
@@ -200,14 +257,7 @@
       "</div>";
     result.innerHTML = html;
     var another = document.getElementById("scan-another");
-    if (another) {
-      another.addEventListener("click", function () {
-        if (fileInput) fileInput.value = "";
-        if (noteInput) noteInput.value = "";
-        result.innerHTML = "";
-        if (fileInput) fileInput.focus();
-      });
-    }
+    if (another) another.addEventListener("click", resetForm);
     if (submitButton) submitButton.disabled = false;
   }
 
@@ -282,8 +332,8 @@
   }
 
   function submitScan() {
-    if (!fileInput || !fileInput.files || !fileInput.files.length) {
-      if (fileInput) fileInput.focus();
+    if (!chosen) {
+      if (cameraInput) cameraInput.focus();
       return;
     }
     if (submitButton) submitButton.disabled = true;
@@ -291,7 +341,7 @@
     stopClock();
     clock = setInterval(tickElapsed, 1000);
     renderProgress("uploading");
-    prepareFile(fileInput.files[0])
+    prepareFile(chosen)
       .then(function (file) {
         var data = new FormData();
         data.append("file", file, file.name);

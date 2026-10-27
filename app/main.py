@@ -26,13 +26,14 @@ from app.models import (
 from app.pending import credit_applications_for_month, resolved_after_close
 from app.money import ZERO, money_equal, money_or_unknown, to_money
 from app.posting import excluded_from_linking, note_value
+from app.agenda import render_agenda
 from app.home import document_due, render_home
 from app.pending_view import render_pending
 from app.report import document_is_suspect, render_monthly_report
 from app.ui import html_response, prefers_html, resolve_lang, selected_month
 from app.phone import router as phone_router
 from app.statements import import_statement_text
-from app.sync import SyncError, run_sync, sync_status
+from app.sync import SyncError, maybe_background_sync, run_sync, start_background_sync, sync_status
 
 # Open tasks that block the month unless the owner accepts them one by one.
 BLOCKING_KINDS = ("missing_document", "missing_sales_invoice")
@@ -47,6 +48,19 @@ app.include_router(phone_router)
 @app.on_event("startup")
 def on_startup():
     init_db()
+    start_background_sync()
+
+
+@app.middleware("http")
+async def sync_when_a_page_opens(request, call_next):
+    accept = request.headers.get("accept") or ""
+    if (
+        request.method == "GET"
+        and "text/html" in accept
+        and not request.url.path.startswith("/static")
+    ):
+        maybe_background_sync()
+    return await call_next(request)
 
 
 def require_month(month):
@@ -283,7 +297,7 @@ def root(
 ):
     if prefers_html(request):
         lang = resolve_lang(request)
-        return html_response(render_home(_dashboard_payload(session, month), lang), lang)
+        return html_response(render_home(session, _dashboard_payload(session, month), lang), lang)
     return {"name": "MonthClose AI", "docs": "/docs"}
 
 
@@ -635,15 +649,27 @@ def close_period(
     }
 
 
+@app.get("/agenda", response_class=HTMLResponse)
+def agenda_page(
+    request: Request,
+    session: Session = Depends(get_session),
+):
+    lang = resolve_lang(request)
+    selected, months = selected_month(session, None)
+    return html_response(render_agenda(session, lang, selected, months), lang)
+
+
 @app.get("/pending", response_class=HTMLResponse)
 def pending_page(
     request: Request,
     month: Optional[str] = Query(default=None),
+    focus: Optional[str] = Query(default=None),
     session: Session = Depends(get_session),
 ):
     lang = resolve_lang(request)
-    selected, months = selected_month(session, month)
-    return html_response(render_pending(session, selected, months, lang), lang)
+    selected, months = selected_month(session, None)
+    chosen = focus if focus in ("review", "suspect") else ""
+    return html_response(render_pending(session, selected, months, lang, chosen), lang)
 
 
 @app.get("/report/{month}/view", response_class=HTMLResponse)

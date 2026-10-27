@@ -1,7 +1,8 @@
-"""Shared page chrome: header, language, month, and the tab bar."""
+"""Shared page chrome: header, language, and the navigation bar."""
 import html
 import re
 from datetime import date, datetime
+from decimal import Decimal
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -9,6 +10,7 @@ from sqlmodel import Session, select
 
 from app.i18n import text
 from app.models import BankLine, Period
+from app.money import to_money
 from app.settings import company_name
 
 _TEMPLATE = (Path(__file__).resolve().parent / "templates" / "base.html").read_text(
@@ -35,11 +37,55 @@ _DOC_KEYS = {
     "other": "doc_other",
 }
 
-_NAV = (
-    ("dashboard", "/", "nav_dashboard"),
-    ("scan", "/scan", "nav_scan"),
-    ("report", "/report", "nav_report"),
+_TOP = (
+    ("dashboard", "/", "nav_home"),
+    ("agenda", "/agenda", "nav_agenda"),
     ("pending", "/pending", "nav_pending"),
+    ("report", "", "nav_report"),
+    ("scan", "/scan", "nav_scan"),
+)
+_TABS = (
+    ("dashboard", "/", "nav_home"),
+    ("agenda", "/agenda", "nav_agenda"),
+    ("scan", "/scan", "nav_scan"),
+    ("pending", "/pending", "nav_pending"),
+    ("report", "", "nav_report"),
+)
+_PT_DAY = ("seg", "ter", "qua", "qui", "sex", "sáb", "dom")
+_EN_DAY = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+_PT_MON = (
+    "jan",
+    "fev",
+    "mar",
+    "abr",
+    "mai",
+    "jun",
+    "jul",
+    "ago",
+    "set",
+    "out",
+    "nov",
+    "dez",
+)
+_EN_MON = (
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec",
+)
+_CAMERA = (
+    "<svg class='nav-icon' viewBox='0 0 24 24' width='26' height='26' aria-hidden='true' "
+    "fill='none' stroke='currentColor' stroke-width='2' stroke-linejoin='round'>"
+    "<path d='M4 8h3l2-2h6l2 2h3v11H4z'></path>"
+    "<circle cx='12' cy='13' r='3.2'></circle></svg>"
 )
 
 
@@ -94,38 +140,122 @@ def selected_month(session, requested):
 
 def page_href(path, month, lang):
     # type: (str, str, str) -> str
-    if path.startswith("/report/"):
-        return "%s?lang=%s" % (path, lang)
-    return "%s?month=%s&lang=%s" % (path, month, lang)
+    """Keep the month argument so older callers still work. Pages are not filtered by it."""
+    return _with_lang(path, lang)
+
+
+def _with_lang(path, lang):
+    # type: (str, str) -> str
+    base, _, query = (path or "/").partition("?")
+    if not base:
+        base = "/"
+    params = []
+    for part in query.split("&"):
+        if not part or part.startswith("lang=") or part.startswith("month="):
+            continue
+        params.append(part)
+    params.append("lang=%s" % lang)
+    return "%s?%s" % (base, "&".join(params))
+
+
+def report_href(month, lang):
+    # type: (str, str) -> str
+    return "/report/%s/view?lang=%s" % (month, lang)
+
+
+def _as_date(value):
+    # type: (object) -> Optional[date]
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    raw = "" if value is None else str(value)
+    try:
+        return datetime.strptime(raw[:10], "%Y-%m-%d").date()
+    except ValueError:
+        return None
 
 
 def show_date(lang, iso):
     # type: (str, object) -> str
-    raw = "" if iso is None else str(iso)
-    parts = raw.split("-")
-    if len(parts) < 3 or len(parts[0]) != 4:
-        return raw
-    year, month_text, day = parts[0], parts[1], parts[2][:2]
+    found = _as_date(iso)
+    if found is None:
+        return "" if iso is None else str(iso)
+    months = _PT_MON if lang == "pt" else _EN_MON
+    return "%d %s %d" % (found.day, months[found.month - 1], found.year)
+
+
+def weekday_date(lang, value, today=None):
+    # type: (str, object, Optional[date]) -> str
+    found = _as_date(value)
+    if found is None:
+        return ""
+    if today is None:
+        today = date.today()
+    days = _PT_DAY if lang == "pt" else _EN_DAY
+    months = _PT_MON if lang == "pt" else _EN_MON
+    label = "%s %d %s" % (days[found.weekday()], found.day, months[found.month - 1])
+    if found.year != today.year:
+        label = "%s %d" % (label, found.year)
+    return label
+
+
+def relative_day(lang, value, today=None):
+    # type: (str, object, Optional[date]) -> str
+    found = _as_date(value)
+    if found is None:
+        return ""
+    if today is None:
+        today = date.today()
+    delta = (found - today).days
+    if delta == 0:
+        return text(lang, "rel_today")
+    if delta == 1:
+        return text(lang, "rel_tomorrow")
+    if delta == -1:
+        return text(lang, "rel_yesterday")
+    if delta > 1:
+        return text(lang, "rel_in_days", n=delta)
+    return text(lang, "rel_ago_days", n=-delta)
+
+
+def relative_time(lang, iso_utc, now=None):
+    # type: (str, object, Optional[datetime]) -> str
+    raw = "" if iso_utc is None else str(iso_utc).replace("Z", "")
     try:
-        month_number = int(month_text)
-        day_number = int(day)
+        stamp = datetime.strptime(raw[:19], "%Y-%m-%dT%H:%M:%S")
     except ValueError:
-        return raw
-    if lang == "pt":
-        return "%02d/%02d/%s" % (day_number, month_number, year)
-    name = text(lang, "month_%d" % month_number) if 1 <= month_number <= 12 else month_text
-    return "%d %s %s" % (day_number, name, year)
+        return ""
+    if now is None:
+        now = datetime.utcnow()
+    seconds = int((now - stamp).total_seconds())
+    if seconds < 45:
+        return text(lang, "rel_now")
+    minutes = seconds // 60
+    if minutes < 60:
+        return text(lang, "rel_min", n=max(minutes, 1))
+    hours = seconds // 3600
+    if hours < 24:
+        if hours == 1:
+            return text(lang, "rel_hour")
+        return text(lang, "rel_hours", n=hours)
+    days = seconds // 86400
+    if days == 1:
+        return text(lang, "rel_day")
+    return text(lang, "rel_days", n=days)
 
 
 def long_date(lang, value):
     # type: (str, date) -> str
-    name = text(lang, "month_%d" % value.month)
-    if lang == "pt":
-        return "%d de %s de %d" % (value.day, name, value.year)
-    return "%d %s %d" % (value.day, name, value.year)
+    return show_date(lang, value)
 
 
 def month_title(lang, month):
+    # type: (str, str) -> str
+    return month_name_year(lang, month)
+
+
+def month_name_year(lang, month):
     # type: (str, str) -> str
     year_text, _, month_text = (month or "").partition("-")
     try:
@@ -135,9 +265,22 @@ def month_title(lang, month):
     if index < 1 or index > 12:
         return month
     name = text(lang, "month_%d" % index)
-    if lang == "pt":
-        return "%s de %s" % (name, year_text)
     return "%s %s" % (name, year_text)
+
+
+def _grouped_whole(amount):
+    # type: (Decimal) -> Tuple[str, str, bool]
+    negative = amount < 0
+    quantized = to_money(abs(amount))
+    text_amount = format(quantized, "f")
+    whole_text, _, frac = text_amount.partition(".")
+    groups = []
+    digits = whole_text
+    while digits:
+        groups.append(digits[-3:])
+        digits = digits[:-3]
+    groups.reverse()
+    return " ".join(groups), frac or "00", negative
 
 
 def show_amount(lang, value):
@@ -145,7 +288,17 @@ def show_amount(lang, value):
     raw = "" if value is None else str(value).strip()
     if raw in ("", "amount to be confirmed"):
         return text(lang, "amount_unknown")
-    return "%s €" % raw
+    try:
+        amount = to_money(raw)
+    except Exception:
+        return text(lang, "amount_unknown")
+    grouped, frac, negative = _grouped_whole(amount)
+    sign = "-" if negative or raw.startswith("-") else ""
+    if lang == "pt":
+        core = "%s,%s €" % (grouped, frac)
+    else:
+        core = "%s.%s €" % (grouped.replace(" ", ","), frac)
+    return "%s%s" % (sign, core)
 
 
 def document_type_label(lang, raw):
@@ -227,9 +380,12 @@ def scan_next_action(card, lang):
 
 def present_scan_card(card, lang):
     # type: (dict, str) -> dict
+    from app.present import plain_reason
+
     tone, label_key = chip_parts(card.get("status"), card.get("category"))
     total = card.get("total")
     shown_total = show_amount(lang, total) if total not in (None, "") else "—"
+    reason = plain_reason(lang, card.get("reasons") or "")
     return {
         "document_type": document_type_label(lang, card.get("document_type")),
         "entity": card.get("entity") or "—",
@@ -238,25 +394,40 @@ def present_scan_card(card, lang):
         "tone": tone,
         "status_label": text(lang, label_key),
         "status": card.get("status") or "",
-        "reason": card.get("reasons") or "",
+        "reason": reason,
         "next_action": scan_next_action(card, lang),
     }
+
+
+def _one_link(lang, active, month, key, base, label_key, scan=False):
+    # type: (str, str, str, str, str, str, bool) -> str
+    if key == "report":
+        href = report_href(month, lang)
+    else:
+        href = page_href(base, month, lang)
+    current = " aria-current='page'" if key == active else ""
+    classes = []
+    if key == active:
+        classes.append("is-active")
+    if scan:
+        classes.append("nav-scan")
+    cls = (" class='%s'" % " ".join(classes)) if classes else ""
+    label = esc(text(lang, label_key))
+    if scan:
+        body = "%s<span class='nav-text'>%s</span>" % (_CAMERA, label)
+    else:
+        body = "<span class='nav-text'>%s</span>" % label
+    return "<a href='%s'%s%s>%s</a>" % (esc(href), cls, current, body)
 
 
 def _nav_links(lang, active, month):
     # type: (str, str, str) -> Tuple[str, str]
     top = []
     tabs = []
-    for key, base, label_key in _NAV:
-        if key == "report":
-            href = "/report/%s/view?lang=%s" % (month, lang)
-        else:
-            href = page_href(base, month, lang)
-        current = " aria-current='page'" if key == active else ""
-        cls = " class='is-active'" if key == active else ""
-        label = esc(text(lang, label_key))
-        top.append("<a href='%s'%s%s>%s</a>" % (esc(href), cls, current, label))
-        tabs.append("<a href='%s'%s%s>%s</a>" % (esc(href), cls, current, label))
+    for key, base, label_key in _TOP:
+        top.append(_one_link(lang, active, month, key, base, label_key, key == "scan"))
+    for key, base, label_key in _TABS:
+        tabs.append(_one_link(lang, active, month, key, base, label_key, key == "scan"))
     return "".join(top), "".join(tabs)
 
 
@@ -272,19 +443,17 @@ def _month_options(lang, months, selected):
     return "".join(parts)
 
 
-def _lang_href(path, month, lang):
-    # type: (str, str, str) -> str
-    if path.startswith("/report/") and "/view" in path:
-        return "%s?lang=%s" % (path.split("?")[0], lang)
-    base = path.split("?")[0] or "/"
-    return page_href(base, month, lang)
+def _other_lang_href(path, lang):
+    # type: (str, str) -> Tuple[str, str]
+    other = "en" if lang == "pt" else "pt"
+    return other.upper(), _with_lang(path, other)
 
 
 def render_page(lang, active, month, months, title, body, path, wide=False):
     # type: (str, str, str, List[str], str, str, str, bool) -> str
     top, tabs = _nav_links(lang, active, month)
-    pt_href = _lang_href(path, month, "pt")
-    en_href = _lang_href(path, month, "en")
+    other_label, other_href = _other_lang_href(path, lang)
+    other_code = "en" if lang == "pt" else "pt-PT"
     html_lang = "pt-PT" if lang == "pt" else "en"
     page = _TEMPLATE
     replacements = {
@@ -292,16 +461,10 @@ def render_page(lang, active, month, months, title, body, path, wide=False):
         "__LANG__": esc(lang),
         "__TITLE__": esc(title),
         "__COMPANY__": esc(company_name()),
-        "__MONTH_LABEL__": esc(text(lang, "month_label")),
-        "__MONTH_OPTIONS__": _month_options(lang, months, month),
-        "__MONTH_NAV__": "report" if active == "report" else "query",
         "__LANG_LABEL__": esc(text(lang, "lang_label")),
-        "__LANG_PT_HREF__": esc(pt_href),
-        "__LANG_EN_HREF__": esc(en_href),
-        "__LANG_PT_CLASS__": "is-active" if lang == "pt" else "",
-        "__LANG_EN_CLASS__": "is-active" if lang == "en" else "",
-        "__LANG_PT_CURRENT__": "aria-current='true'" if lang == "pt" else "",
-        "__LANG_EN_CURRENT__": "aria-current='true'" if lang == "en" else "",
+        "__LANG_OTHER_HREF__": esc(other_href),
+        "__LANG_OTHER__": esc(other_label),
+        "__LANG_OTHER_CODE__": esc(other_code),
         "__NAV_LABEL__": esc(text(lang, "nav_label")),
         "__TOPNAV__": top,
         "__TABBAR__": tabs,

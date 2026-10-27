@@ -20,7 +20,11 @@ from app.models import Category, Document, PhoneScan
 from app.money import to_money
 from app.posting import note_value
 from app.process_one import process_scan_bytes, save_scan_file
+from app.i18n import set_generation_lang
 from app.settings import scan_code
+
+SCAN_COOKIE = "scan_access"
+SCAN_COOKIE_SECONDS = 60 * 60 * 24 * 30
 from app.ui import (
     esc,
     html_response,
@@ -73,6 +77,43 @@ def codes_match(given):
     left = hashlib.sha256(given.strip().encode("utf-8")).hexdigest()
     right = hashlib.sha256(expected.encode("utf-8")).hexdigest()
     return hmac.compare_digest(left, right)
+
+
+def scan_token():
+    # type: () -> str
+    expected = scan_code()
+    if not expected:
+        return ""
+    return hmac.new(
+        expected.encode("utf-8"),
+        b"monthclose-scan-v1",
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def scan_cookie_ok(request):
+    # type: (object) -> bool
+    expected = scan_token()
+    given = (request.cookies.get(SCAN_COOKIE) or "").strip()
+    if not expected or not given:
+        return False
+    return hmac.compare_digest(given, expected)
+
+
+def _remember_code(response):
+    # type: (JSONResponse) -> JSONResponse
+    token = scan_token()
+    if not token:
+        return response
+    response.set_cookie(
+        SCAN_COOKIE,
+        token,
+        max_age=SCAN_COOKIE_SECONDS,
+        path="/",
+        httponly=True,
+        samesite="lax",
+    )
+    return response
 
 
 def _allowed(filename, content_type):
@@ -221,9 +262,10 @@ def _job_snapshot(job_id):
         }
 
 
-def _run_job(job_id, data, filename, note):
-    # type: (str, bytes, str, str) -> None
+def _run_job(job_id, data, filename, note, lang):
+    # type: (str, bytes, str, str, str) -> None
     started = time.perf_counter()
+    set_generation_lang(lang)
     try:
         with Session(engine) as session:
             categories = list_categories(session)
@@ -267,33 +309,50 @@ def _strings(lang, month):
     return json.dumps(payload, ensure_ascii=False)
 
 
-def render_scan_page(lang, month, months):
-    # type: (str, str, List[str]) -> str
+def render_scan_page(lang, month, months, remembered=False):
+    # type: (str, str, List[str], bool) -> str
+    if remembered:
+        code_fields = ""
+    else:
+        code_fields = (
+            "<label for='code'>%s</label>"
+            "<input id='code' name='code' type='text' autocomplete='off' maxlength='40' required>"
+            % esc(text(lang, "scan_code"))
+        )
     body = """
 <h1>%s</h1>
 <p class="lead">%s</p>
-<p><a href="%s">%s</a></p>
 <form id="scan-form" action="/scan/upload" method="post" enctype="multipart/form-data">
-  <label for="file">%s</label>
-  <input id="file" name="file" type="file" accept="image/*,application/pdf" capture="environment" required>
-  <label for="note">%s</label>
-  <textarea id="note" name="note" maxlength="500"></textarea>
-  <label for="code">%s</label>
-  <input id="code" name="code" type="text" autocomplete="off" maxlength="40" required>
-  <button id="scan-send" type="submit">%s</button>
+  <div class="scan-actions">
+    <input id="camera" class="file-input" name="camera" type="file" accept="image/*" capture="environment">
+    <label class="btn btn-camera" for="camera">%s</label>
+    <input id="library" class="file-input" name="library" type="file" accept="image/*,application/pdf">
+    <label class="btn btn-ghost" for="library">%s</label>
+  </div>
+  <div id="preview" class="preview"></div>
+  <button type="button" class="text-button" id="add-note">%s</button>
+  <div id="note-panel" hidden>
+    <label for="note">%s</label>
+    <textarea id="note" name="note" maxlength="500"></textarea>
+  </div>
+  %s
+  <button id="scan-send" type="submit" hidden>%s</button>
 </form>
+<p class="quiet"><a href="%s">%s</a></p>
 <noscript><p class="error-card">%s</p></noscript>
 <div id="result"></div>
 <script type="application/json" id="scan-strings">%s</script>
 """ % (
         esc(text(lang, "scan_title")),
         esc(text(lang, "scan_lead")),
+        esc(text(lang, "scan_camera")),
+        esc(text(lang, "scan_choose")),
+        esc(text(lang, "scan_add_note")),
+        esc(text(lang, "scan_note")),
+        code_fields,
+        esc(text(lang, "scan_send")),
         esc(page_href("/scan/recent", month, lang)),
         esc(text(lang, "see_recent")),
-        esc(text(lang, "scan_file")),
-        esc(text(lang, "scan_note")),
-        esc(text(lang, "scan_code")),
-        esc(text(lang, "scan_send")),
         esc(text(lang, "scan_noscript")),
         _strings(lang, month),
     )
@@ -367,10 +426,8 @@ def render_recent_page(lang, month, months, rows):
         body_cards = "".join(cards)
     else:
         body_cards = "<p class='quiet'>%s</p>" % esc(text(lang, "scan_recent_empty"))
-    body = "<h1>%s</h1><p><a href='%s'>%s</a></p>%s" % (
+    body = "<h1>%s</h1>%s" % (
         esc(text(lang, "scan_recent_title")),
-        esc(page_href("/scan", month, lang)),
-        esc(text(lang, "scan_title")),
         body_cards,
     )
     return render_page(
@@ -390,8 +447,9 @@ def scan_page(
     session: Session = Depends(get_session),
 ):
     lang = resolve_lang(request)
-    month, months = selected_month(session, request.query_params.get("month"))
-    return html_response(render_scan_page(lang, month, months), lang)
+    month, months = selected_month(session, None)
+    page = render_scan_page(lang, month, months, remembered=scan_cookie_ok(request))
+    return html_response(page, lang)
 
 
 @router.get("/scan/recent")
@@ -422,12 +480,14 @@ def recent_scans(
 
 @router.post("/scan/upload")
 def upload_scan(
+    request: Request,
     file: UploadFile = File(...),
     note: str = Form(""),
     code: str = Form(""),
 ):
     """Accept the file and return a job id. Reading continues in the background."""
-    if not codes_match(code):
+    allowed = codes_match(code) or scan_cookie_ok(request)
+    if not allowed:
         return _error("bad_code", 401)
     filename = file.filename or "scan"
     if not _allowed(filename, file.content_type or ""):
@@ -449,12 +509,15 @@ def upload_scan(
     _remember_job(job)
     thread = threading.Thread(
         target=_run_job,
-        args=(job_id, data, filename, note or ""),
+        args=(job_id, data, filename, note or "", resolve_lang(request)),
         name="scan-%s" % job_id,
     )
     thread.daemon = True
     thread.start()
-    return {"id": job_id, "step": "uploading"}
+    response = JSONResponse({"id": job_id, "step": "uploading"})
+    if codes_match(code):
+        return _remember_code(response)
+    return response
 
 
 @router.get("/scan/status/{job_id}")
